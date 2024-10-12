@@ -1,5 +1,8 @@
 from itertools import count
 import gymnasium as gym
+
+import numpy as np
+
 import matplotlib.pyplot as plt
 import matplotlib
 
@@ -13,20 +16,15 @@ class MODE(Enum):
     TRAIN = 0
     TEST = 1
 
-current_mode = MODE.TEST
+current_mode = MODE.TRAIN
 
 # Initialise the environment
-# env = gym.make("CarRacing-v3")
-
 if current_mode == MODE.TRAIN:
-    env = gym.make("CartPole-v1")
+    # env = gym.make("CartPole-v1")
+    env = gym.make("CarRacing-v3", continuous=False)
 elif current_mode == MODE.TEST:
-    env = gym.make("CartPole-v1", render_mode="human")
-
-# set up matplotlib
-is_ipython = 'inline' in matplotlib.get_backend()
-
-plt.ion()
+    # env = gym.make("CartPole-v1", render_mode="human")
+    env = gym.make("CarRacing-v3", render_mode="human", continuous=False)
 
 device = torch.device(
     "cuda" if torch.cuda.is_available() else
@@ -38,7 +36,6 @@ obs, _ = env.reset()
 
 if current_mode == MODE.TRAIN:
 
-
     if torch.cuda.is_available() or torch.backends.mps.is_available():
         num_episodes = 600
     else:
@@ -49,19 +46,24 @@ if current_mode == MODE.TRAIN:
     for i_episode in range(num_episodes):
         # Initialize the environment and get its state
         state, info = env.reset()
-        state = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
+        state = torch.tensor(state, dtype=torch.float32, device=device)
+        state = state.permute(2, 0, 1).unsqueeze(0)
+        cumulated_reward = 0
         for t in count():
             action = manager.select_action(state)
-            observation, reward, terminated, truncated, _ = env.step(action.item())
-            reward = torch.tensor([reward], device=device)
+            observation, reward, terminated, truncated, _ = env.step(np.int64(action.item()))
             done = terminated or truncated
 
             if terminated:
                 next_state = None
             else:
-                next_state = torch.tensor(observation, dtype=torch.float32, device=device).unsqueeze(0)
+                next_state = torch.tensor(observation, dtype=torch.float32, device=device)
+                next_state = next_state.permute(2, 0, 1).unsqueeze(0)
 
+            cumulated_reward += reward
             # Store the transition in memory
+            action = torch.tensor([[action]], device=device, dtype=torch.long)
+            reward = torch.tensor([reward], device=device)
             manager.memory.push(state, action, next_state, reward)
 
             # Move to the next state
@@ -73,13 +75,14 @@ if current_mode == MODE.TRAIN:
             
             if done:
                 manager.episode_durations.append(t + 1)
-                manager.plot_durations()
+                manager.rewards.append(cumulated_reward)
+                if(i_episode % 10 == 0):
+                    print(f"Episode {i_episode} lasted {t + 1} steps")
+                    stats = manager.get_stats()
+                    print(f"Mean duration: {stats[0]}, Mean reward: {stats[1]}")
                 break
 
     print('Complete')
-    manager.plot_durations(show_result=True)
-    plt.ioff()
-    plt.show()
 
     # save the model
     torch.save(manager.policy_net.state_dict(), "model.pth")

@@ -1,4 +1,4 @@
-from dqn.dqn import DQN
+from dqn.dqn import DQN_CNN
 from dqn.replay_buffer import ReplayMemory, Transition
 
 import torch
@@ -39,19 +39,19 @@ class DQNManager:
         n_actions = env.action_space.n
         # Get the number of state observations
         state, info = env.reset()
-        n_observations = len(state)
+        n_observations = state.shape
 
-        self.policy_net = DQN(n_observations, n_actions).to(device)
-        self.target_net = DQN(n_observations, n_actions).to(device)
+        self.policy_net = DQN_CNN(n_observations, n_actions).to(device)
+        self.target_net = DQN_CNN(n_observations, n_actions).to(device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
 
         self.optimizer = optim.AdamW(self.policy_net.parameters(), lr=LR, amsgrad=True)
         self.memory = ReplayMemory(10000)
 
         self.episode_durations = []
+        self.rewards = []
 
         self.steps_done = 0
-
 
     def select_action(self, state):
         sample = random.random()
@@ -63,10 +63,19 @@ class DQNManager:
                 # t.max(1) will return the largest column value of each row.
                 # second column on max result is index of where max element was
                 # found, so we pick action with the larger expected reward.
-                return self.policy_net(state).max(1).indices.view(1, 1)
+                return self.policy_net(state).max(1)[1].view(1, 1)
         else:
             return torch.tensor([[self.env.action_space.sample()]], device=device, dtype=torch.long)
 
+    def get_stats(self):
+        # Get the mean duration and rewards of the last 100 episodes
+        if len(self.episode_durations) < 100:
+            return 0, 0
+        mean_duration = sum(self.episode_durations[-100:])/100
+        mean_reward = sum(self.rewards[-100:])/100
+        return mean_duration, mean_reward
+
+            
 
     def plot_durations(self, show_result=False):
         plt.figure(1)
