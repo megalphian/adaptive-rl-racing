@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 # EPS_DECAY controls the rate of exponential decay of epsilon, higher means a slower decay
 # TAU is the update rate of the target network
 # LR is the learning rate of the ``AdamW`` optimizer
-BATCH_SIZE = 128
+BATCH_SIZE = 32
 GAMMA = 0.99
 EPS_START = 0.9
 EPS_END = 0.05
@@ -69,13 +69,9 @@ class DQNManager:
 
     def get_stats(self):
         # Get the mean duration and rewards of the last 100 episodes
-        if len(self.episode_durations) < 100:
-            return 0, 0
-        mean_duration = sum(self.episode_durations[-100:])/100
-        mean_reward = sum(self.rewards[-100:])/100
+        mean_duration = sum(self.episode_durations[-100:])/len(self.episode_durations[-100:])
+        mean_reward = sum(self.rewards[-100:])/len(self.rewards[-100:])
         return mean_duration, mean_reward
-
-            
 
     def plot_durations(self, show_result=False):
         plt.figure(1)
@@ -109,9 +105,9 @@ class DQNManager:
         # (a final state would've been the one after which simulation ended)
         non_final_mask = torch.tensor(tuple(map(lambda s: s is not None,
                                             batch.next_state)), device=device, dtype=torch.bool)
-        non_final_next_states = torch.cat([s for s in batch.next_state
+        non_final_next_states = torch.stack([s for s in batch.next_state
                                                     if s is not None])
-        state_batch = torch.cat(batch.state)
+        state_batch = torch.stack(batch.state)
         action_batch = torch.cat(batch.action)
         reward_batch = torch.cat(batch.reward)
 
@@ -150,3 +146,7 @@ class DQNManager:
         for key in policy_net_state_dict:
             target_net_state_dict[key] = policy_net_state_dict[key]*TAU + target_net_state_dict[key]*(1-TAU)
         self.target_net.load_state_dict(target_net_state_dict)
+
+    def hard_update(self):
+        # Hard update of the target network's weights
+        self.target_net.load_state_dict(self.policy_net.state_dict())

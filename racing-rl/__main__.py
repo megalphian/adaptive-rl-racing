@@ -1,5 +1,6 @@
 from itertools import count
 import gymnasium as gym
+import gymnasium.wrappers as gym_wrap
 
 import numpy as np
 
@@ -16,7 +17,7 @@ class MODE(Enum):
     TRAIN = 0
     TEST = 1
 
-current_mode = MODE.TRAIN
+current_mode = MODE.TEST
 
 # Initialise the environment
 if current_mode == MODE.TRAIN:
@@ -26,6 +27,10 @@ elif current_mode == MODE.TEST:
     # env = gym.make("CartPole-v1", render_mode="human")
     env = gym.make("CarRacing-v3", render_mode="human", continuous=False)
 
+env = gym_wrap.GrayscaleObservation(env)
+env = gym_wrap.ResizeObservation(env, (84, 84))
+env = gym_wrap.FrameStackObservation(env, stack_size=4)
+
 device = torch.device(
     "cuda" if torch.cuda.is_available() else
     "mps" if torch.backends.mps.is_available() else
@@ -34,10 +39,15 @@ device = torch.device(
 
 obs, _ = env.reset()
 
+timestep_n = 0
+when2learn = 4 # in timesteps
+when2sync = 5000 # in timesteps
+when2save = 100000 # in timesteps
+
 if current_mode == MODE.TRAIN:
 
     if torch.cuda.is_available() or torch.backends.mps.is_available():
-        num_episodes = 600
+        num_episodes = 1000
     else:
         num_episodes = 50
 
@@ -47,9 +57,9 @@ if current_mode == MODE.TRAIN:
         # Initialize the environment and get its state
         state, info = env.reset()
         state = torch.tensor(state, dtype=torch.float32, device=device)
-        state = state.permute(2, 0, 1).unsqueeze(0)
         cumulated_reward = 0
         for t in count():
+            timestep_n += 1
             action = manager.select_action(state)
             observation, reward, terminated, truncated, _ = env.step(np.int64(action.item()))
             done = terminated or truncated
@@ -58,7 +68,6 @@ if current_mode == MODE.TRAIN:
                 next_state = None
             else:
                 next_state = torch.tensor(observation, dtype=torch.float32, device=device)
-                next_state = next_state.permute(2, 0, 1).unsqueeze(0)
 
             cumulated_reward += reward
             # Store the transition in memory
@@ -69,9 +78,14 @@ if current_mode == MODE.TRAIN:
             # Move to the next state
             state = next_state
 
+            if timestep_n % when2learn == 0:
+                manager.optimize_model()
+                manager.soft_update()
+            
+            if timestep_n % when2sync == 0:
+                manager.hard_update()
+
             # Perform one step of the optimization (on the policy network)
-            manager.optimize_model()
-            manager.soft_update()
             
             if done:
                 manager.episode_durations.append(t + 1)
@@ -90,22 +104,22 @@ if current_mode == MODE.TRAIN:
 elif current_mode == MODE.TEST:
 
     manager = DQNManager(env)
-    manager.policy_net.load_state_dict(torch.load("Models/Cartpole/model.pth", weights_only=True))
+    # manager.policy_net.load_state_dict(torch.load("Models/Cartpole/model.pth", weights_only=True))
+    manager.policy_net.load_state_dict(torch.load("Models/Racing/model.pth", weights_only=True))
     manager.policy_net.eval()
 
     state, info = env.reset()
-    state = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
+    state = torch.tensor(state, dtype=torch.float32, device=device)
     for t in count():
         env.render()
-        action = manager.policy_net(state).max(1).indices.view(1, 1)
-        observation, reward, terminated, truncated, _ = env.step(action.item())
-        reward = torch.tensor([reward], device=device)
+        action = manager.select_action(state)
+        observation, reward, terminated, truncated, _ = env.step(np.int64(action.item()))
         done = terminated or truncated
 
         if terminated:
             next_state = None
         else:
-            next_state = torch.tensor(observation, dtype=torch.float32, device=device).unsqueeze(0)
+            next_state = torch.tensor(observation, dtype=torch.float32, device=device)
 
         # Move to the next state
         state = next_state
