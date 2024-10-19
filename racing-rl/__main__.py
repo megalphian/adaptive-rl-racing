@@ -9,15 +9,17 @@ import matplotlib
 
 import torch
 
-from dqn.main import DQNManager
+from dqn.main import DQNManager, SkipFrame
 
 from enum import Enum
+
+import wandb
 
 class MODE(Enum): 
     TRAIN = 0
     TEST = 1
 
-current_mode = MODE.TEST
+current_mode = MODE.TRAIN
 
 # Initialise the environment
 if current_mode == MODE.TRAIN:
@@ -27,6 +29,7 @@ elif current_mode == MODE.TEST:
     # env = gym.make("CartPole-v1", render_mode="human")
     env = gym.make("CarRacing-v3", render_mode="human", continuous=False)
 
+env = SkipFrame(env, skip=4)
 env = gym_wrap.GrayscaleObservation(env)
 env = gym_wrap.ResizeObservation(env, (84, 84))
 env = gym_wrap.FrameStackObservation(env, stack_size=4)
@@ -45,6 +48,20 @@ when2sync = 5000 # in timesteps
 when2save = 100000 # in timesteps
 
 if current_mode == MODE.TRAIN:
+
+    # start a new wandb run to track this script
+    wandb.init(
+        # set the wandb project where this run will be logged
+        project="my-awesome-project",
+
+        # track hyperparameters and run metadata
+        config={
+        "learning_rate": 0.02,
+        "architecture": "CNN",
+        "dataset": "CIFAR-100",
+        "epochs": 10,
+        }
+    )
 
     if torch.cuda.is_available() or torch.backends.mps.is_available():
         num_episodes = 1000
@@ -94,12 +111,17 @@ if current_mode == MODE.TRAIN:
                     print(f"Episode {i_episode} lasted {t + 1} steps")
                     stats = manager.get_stats()
                     print(f"Mean duration: {stats[0]}, Mean reward: {stats[1]}")
+
+                wandb.log({"episode_num": i_episode, "total_reward": cumulated_reward, "episode_duration": t+1})
+                
+                # manager.hard_update()
                 break
 
     print('Complete')
 
     # save the model
     torch.save(manager.policy_net.state_dict(), "model.pth")
+    wandb.finish()
 
 elif current_mode == MODE.TEST:
 
@@ -111,7 +133,7 @@ elif current_mode == MODE.TEST:
     state, info = env.reset()
     state = torch.tensor(state, dtype=torch.float32, device=device)
     for t in count():
-        env.render()
+        # env.render()
         action = manager.select_action(state)
         observation, reward, terminated, truncated, _ = env.step(np.int64(action.item()))
         done = terminated or truncated

@@ -9,6 +9,7 @@ import math
 import random
 
 import matplotlib.pyplot as plt
+import gymnasium as gym
 
 # BATCH_SIZE is the number of transitions sampled from the replay buffer
 # GAMMA is the discount factor as mentioned in the previous section
@@ -30,6 +31,21 @@ device = torch.device(
     "mps" if torch.backends.mps.is_available() else
     "cpu"
 )
+
+### Using a frame skip to keep an action for multiple frames
+class SkipFrame(gym.Wrapper):
+    def __init__(self, env, skip):
+        super().__init__(env)
+        self._skip = skip
+
+    def step(self, action):
+        total_reward = 0.0
+        for _ in range(self._skip):
+            state, reward, terminated, truncated, info = self.env.step(action)
+            total_reward += reward
+            if terminated:
+                break
+        return state, total_reward, terminated, truncated, info
 
 class DQNManager:
 
