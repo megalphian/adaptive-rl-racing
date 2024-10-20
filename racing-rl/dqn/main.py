@@ -69,6 +69,10 @@ class DQNManager:
 
         self.steps_done = 0
 
+    def select_greedy_action(self, state):
+        with torch.no_grad():
+            return self.policy_net(state).max(1)[1].view(1, 1)
+
     def select_action(self, state):
         sample = random.random()
         eps_threshold = EPS_END + (EPS_START - EPS_END) * \

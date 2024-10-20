@@ -19,7 +19,7 @@ class MODE(Enum):
     TRAIN = 0
     TEST = 1
 
-current_mode = MODE.TRAIN
+current_mode = MODE.TEST
 
 # Initialise the environment
 if current_mode == MODE.TRAIN:
@@ -132,24 +132,23 @@ elif current_mode == MODE.TEST:
 
     state, info = env.reset()
     state = torch.tensor(state, dtype=torch.float32, device=device)
+    cumulated_reward = 0
     for t in count():
         # env.render()
-        action = manager.select_action(state)
+        action = manager.select_greedy_action(state)
         observation, reward, terminated, truncated, _ = env.step(np.int64(action.item()))
         done = terminated or truncated
-
-        if terminated:
-            next_state = None
-        else:
-            next_state = torch.tensor(observation, dtype=torch.float32, device=device)
-
-        # Move to the next state
-        state = next_state
+        cumulated_reward += reward
 
         if done:
             break
+        else:
+            next_state = torch.tensor(observation, dtype=torch.float32, device=device)
+            # Move to the next state
+            state = next_state
 
     print('Complete')
     print(f"Episode lasted {t + 1} steps")
+    print(f"Total reward: {cumulated_reward}")
 
     env.close()
