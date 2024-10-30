@@ -157,3 +157,6 @@ class DQNManager:
     
     def save_model(self):
         torch.save(self.policy_net.state_dict(), "model.pth")
+    
+    def reset(self):
+        pass

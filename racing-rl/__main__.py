@@ -76,12 +76,9 @@ if current_mode == MODE.TRAIN:
         )
 
     if torch.cuda.is_available() or torch.backends.mps.is_available():
-        num_episodes = 1000
+        num_episodes = 2000
     else:
         num_episodes = 50
-
-    # Overload for testing the code
-    num_episodes = 20
 
     if current_policy == Policy.DQN:
         manager = DQNManager(env)
@@ -90,55 +87,59 @@ if current_mode == MODE.TRAIN:
     else:
         raise ValueError("Policy not supported")
     
-    for i_episode in range(num_episodes):
-        # Initialize the environment and get its state
-        state, info = env.reset()
-        state = torch.tensor(state, dtype=torch.float32, device=device)
-        cumulated_reward = 0
-        for t in count():
-            timestep_n += 1
-            action = manager.select_action(state)
-            if(current_policy == Policy.DDPG):
-                observation, reward, terminated, truncated, _ = env.step(action.cpu().numpy())
-            else:
-                observation, reward, terminated, truncated, _ = env.step(np.int64(action.item()))
-            done = terminated or truncated
+    try:
+        for i_episode in range(num_episodes):
+            # Initialize the environment and get its state
+            state, info = env.reset()
+            manager.reset()
+            state = torch.tensor(state, dtype=torch.float32, device=device)
+            cumulated_reward = 0
+            for t in count():
+                timestep_n += 1
+                action = manager.select_action(state)
+                if(current_policy == Policy.DDPG):
+                    observation, reward, terminated, truncated, _ = env.step(action.cpu().numpy())
+                else:
+                    observation, reward, terminated, truncated, _ = env.step(np.int64(action.item()))
+                done = terminated or truncated
 
-            if terminated:
-                next_state = None
-            else:
-                next_state = torch.tensor(observation, dtype=torch.float32, device=device)
+                if terminated:
+                    next_state = None
+                else:
+                    next_state = torch.tensor(observation, dtype=torch.float32, device=device)
 
-            cumulated_reward += reward
-            # Store the transition in memory
-            reward = torch.tensor([reward], device=device)
-            manager.memory.push(state, action, next_state, reward)
+                cumulated_reward += reward
+                # Store the transition in memory
+                reward = torch.tensor([reward], device=device)
+                manager.memory.push(state, action, next_state, reward)
 
-            # Move to the next state
-            state = next_state
+                # Move to the next state
+                state = next_state
 
-            if timestep_n % when2learn == 0:
-                manager.optimize_model()
-                manager.soft_update()
+                if timestep_n % when2learn == 0:
+                    manager.optimize_model()
+                    manager.soft_update()
 
-            # Perform one step of the optimization (on the policy network)
-            
-            if done:
-                manager.episode_durations.append(t + 1)
-                manager.rewards.append(cumulated_reward)
-                if(i_episode % 10 == 0):
-                    print(f"Episode {i_episode} lasted {t + 1} steps")
-                    stats = manager.get_stats()
-                    print(f"Mean duration: {stats[0]}, Mean reward: {stats[1]}")
-
-                if wandb_use:
-                    wandb.log({"episode_num": i_episode, "total_reward": cumulated_reward, "episode_duration": t+1})
-
-                    if(current_policy == Policy.DDPG):
-                        wandb.log({"mean_critic_loss": stats[2], "mean_actor_loss": stats[3]})
+                # Perform one step of the optimization (on the policy network)
                 
-                # manager.hard_update()
-                break
+                if done:
+                    manager.episode_durations.append(t + 1)
+                    manager.rewards.append(cumulated_reward)
+                    if(i_episode % 10 == 0):
+                        print(f"Episode {i_episode} lasted {t + 1} steps")
+                        stats = manager.get_stats()
+                        print(f"Mean duration: {stats[0]}, Mean reward: {stats[1]}")
+
+                    if wandb_use:
+                        wandb.log({"episode_num": i_episode, "total_reward": cumulated_reward, "episode_duration": t+1})
+
+                        if(current_policy == Policy.DDPG):
+                            wandb.log({"mean_critic_loss": stats[2], "mean_actor_loss": stats[3]})
+                    
+                    # manager.hard_update()
+                    break
+    except KeyboardInterrupt:
+        print("Training interrupted")
 
     print('Complete')
     manager.save_model()
@@ -148,10 +149,16 @@ if current_mode == MODE.TRAIN:
 
 elif current_mode == MODE.TEST:
 
-    manager = DQNManager(env)
-    # manager.policy_net.load_state_dict(torch.load("Models/Cartpole/model.pth", weights_only=True))
-    manager.policy_net.load_state_dict(torch.load("Models/Racing/model.pth", weights_only=True))
-    manager.policy_net.eval()
+    if current_policy == Policy.DQN:
+        manager = DQNManager(env)
+        # manager.policy_net.load_state_dict(torch.load("Models/Cartpole/model.pth", weights_only=True))
+        manager.policy_net.load_state_dict(torch.load("Models/Racing/model.pth", weights_only=True))
+        manager.policy_net.eval()
+    elif current_policy == Policy.DDPG:
+        manager = DDPGManager(env)
+        # manager.actor_net.load_state_dict(torch.load("Models/Cartpole/model.pth", weights_only=True))
+        manager.actor_net.load_state_dict(torch.load("actor.pth", weights_only=True))
+        manager.actor_net.eval()
 
     state, info = env.reset()
     state = torch.tensor(state, dtype=torch.float32, device=device)
@@ -159,7 +166,11 @@ elif current_mode == MODE.TEST:
     for t in count():
         # env.render()
         action = manager.select_greedy_action(state)
-        observation, reward, terminated, truncated, _ = env.step(np.int64(action.item()))
+        print(action)
+        if(current_policy == Policy.DDPG):
+            observation, reward, terminated, truncated, _ = env.step(action.cpu().numpy())
+        else:
+            observation, reward, terminated, truncated, _ = env.step(np.int64(action.item()))
         done = terminated or truncated
         cumulated_reward += reward
 

@@ -23,7 +23,12 @@ class NoiseGenerator:
         # Reinitialize generator
         self.x = np.zeros_like(self.x_shape)
 
-    def generate(self):
+    def generate(self, std_dev_factor=None):
+        if std_dev_factor is not None:
+            self.std_dev[0] = self.std_dev[0] * std_dev_factor
+            self.std_dev[1] = std_dev_factor
+            self.std_dev[2] = std_dev_factor
+
         # The result is based on the old value
         # The second segment will keep values near a mean value
         # It uses normal distribution multiplied by a standard deviation

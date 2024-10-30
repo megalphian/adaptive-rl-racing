@@ -21,9 +21,9 @@ BATCH_SIZE = 32
 GAMMA = 0.99
 EPS_START = 0.9
 EPS_END = 0.05
-EPS_DECAY = 1000
+EPS_DECAY = 2000
 TAU = 0.005
-LR = 1e-4
+LR = 1e-3
 
 device = torch.device(
     "cuda" if torch.cuda.is_available() else
@@ -62,26 +62,33 @@ class DDPGManager:
 
         noise_mean = np.full(self.n_actions, 0.0, np.float32)
         noise_std  = np.full(self.n_actions, 0.2, np.float32)
-        self.noise_generator = NoiseGenerator(noise_mean, noise_std) 
+        self.noise_generator = NoiseGenerator(noise_mean, noise_std)
+
+        self.reset() 
 
     def select_greedy_action(self, state):
         with torch.no_grad():
             return self.actor_net(state)[0]
 
     def select_action(self, state):
-        sample = random.random()
         eps_threshold = EPS_END + (EPS_START - EPS_END) * \
             math.exp(-1. * self.steps_done / EPS_DECAY)
         self.steps_done += 1
-        action = self.select_greedy_action(state).cpu().numpy()
-        if sample <= eps_threshold:
-            # Exploration
-            action = action + self.noise_generator.generate()
+        with torch.no_grad():
+            action = self.actor_net(state)[0].cpu().numpy()
+        action = action + self.noise_generator.generate(std_dev_factor=eps_threshold)
         
-        return self.encode_action(action)
+        print(action)
+        self.noise_generator.reset()
+        return torch.tensor(action, device=device, dtype=torch.float32)
             
     def encode_action(self, action):
-        return torch.tensor([action[0], action[1].clip(0,1), action[2].clip(0,1)], device=device, dtype=torch.float32)
+        return torch.tensor([action[0], abs(action[1]).clip(0,1), abs(action[2]).clip(0,1)], device=device, dtype=torch.float32)
+    
+    def reset(self):
+        self.noise_generator.reset()
+        self.critic_loss = []
+        self.actor_loss = []
 
     def get_stats(self):
         # Get the mean duration and rewards of the last 100 episodes
@@ -122,15 +129,13 @@ class DDPGManager:
         expected_state_action_values = (next_state_values * GAMMA) + reward_batch
 
         # Compute Huber loss
-        criterion = nn.SmoothL1Loss()
+        criterion = nn.MSELoss()
         critic_loss = criterion(state_action_values, expected_state_action_values.unsqueeze(1))
         self.critic_loss.append(critic_loss.item())
 
         # Optimize the model
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
-        # In-place gradient clipping
-        torch.nn.utils.clip_grad_value_(self.critic_net.parameters(), 100)
         self.critic_optimizer.step()
 
         # Compute actor loss
@@ -141,22 +146,32 @@ class DDPGManager:
 
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
-        # In-place gradient clipping
-        torch.nn.utils.clip_grad_value_(self.actor_net.parameters(), 100)
         self.actor_optimizer.step()
 
     def soft_update(self):
         # Soft update of the target network's weights
         # θ′ ← τ θ + (1 −τ )θ′
-        for target_param, param in zip(self.actor_target.parameters(), self.actor_net.parameters()):
-            target_param.data.copy_(TAU * param.data + (1 - TAU) * target_param.data)
+        # for target_param, param in zip(self.actor_target.parameters(), self.actor_net.parameters()):
+        #     target_param.data.copy_(TAU * param.data + (1 - TAU) * target_param.data)
         
-        for target_param, param in zip(self.critic_target.parameters(), self.critic_net.parameters()):
-            target_param.data.copy_(TAU * param.data + (1 - TAU) * target_param.data)
+        # for target_param, param in zip(self.critic_target.parameters(), self.critic_net.parameters()):
+        #     target_param.data.copy_(TAU * param.data + (1 - TAU) * target_param.data)
+
+        target_net_state_dict = self.actor_target.state_dict()
+        policy_net_state_dict = self.actor_net.state_dict()
+        for key in policy_net_state_dict:
+            target_net_state_dict[key] = policy_net_state_dict[key]*TAU + target_net_state_dict[key]*(1-TAU)
+        self.actor_target.load_state_dict(target_net_state_dict)
+        
+        target_net_state_dict = self.critic_target.state_dict()
+        policy_net_state_dict = self.critic_net.state_dict()
+        for key in policy_net_state_dict:
+            target_net_state_dict[key] = policy_net_state_dict[key]*TAU + target_net_state_dict[key]*(1-TAU)
+        self.critic_target.load_state_dict(target_net_state_dict)
 
     def hard_update(self):
         # Hard update of the target network's weights
-        self.target_net.load_state_dict(self.policy_net.state_dict())
+        pass
 
     def save_model(self):
         # save the model
