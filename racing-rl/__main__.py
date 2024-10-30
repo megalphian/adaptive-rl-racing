@@ -28,12 +28,13 @@ class Policy(Enum):
 
 current_mode = MODE.TRAIN
 current_policy = Policy.DDPG
+wandb_use = False
 
 # Initialise the environment
 if current_mode == MODE.TRAIN:
     # env = gym.make("CartPole-v1")
     # env = gym.make("CarRacing-v3", continuous=False)
-    env = gym.make("CarRacing-v3")
+    env = gym.make("CarRacing-v3", render_mode="human")
 elif current_mode == MODE.TEST:
     # env = gym.make("CartPole-v1", render_mode="human")
     # env = gym.make("CarRacing-v3", render_mode="human", continuous=False)
@@ -59,19 +60,20 @@ when2save = 100000 # in timesteps
 
 if current_mode == MODE.TRAIN:
 
-    # start a new wandb run to track this script
-    wandb.init(
-        # set the wandb project where this run will be logged
-        project="my-awesome-project",
+    if wandb_use:
+        # start a new wandb run to track this script
+        wandb.init(
+            # set the wandb project where this run will be logged
+            project="my-awesome-project",
 
-        # track hyperparameters and run metadata
-        config={
-        "learning_rate": 0.02,
-        "architecture": "CNN",
-        "dataset": "CIFAR-100",
-        "epochs": 10,
-        }
-    )
+            # track hyperparameters and run metadata
+            config={
+            "learning_rate": 0.02,
+            "architecture": "CNN",
+            "dataset": "CIFAR-100",
+            "epochs": 10,
+            }
+        )
 
     if torch.cuda.is_available() or torch.backends.mps.is_available():
         num_episodes = 1000
@@ -96,7 +98,10 @@ if current_mode == MODE.TRAIN:
         for t in count():
             timestep_n += 1
             action = manager.select_action(state)
-            observation, reward, terminated, truncated, _ = env.step(np.int64(action.item()))
+            if(current_policy == Policy.DDPG):
+                observation, reward, terminated, truncated, _ = env.step(action.cpu().numpy())
+            else:
+                observation, reward, terminated, truncated, _ = env.step(np.int64(action.item()))
             done = terminated or truncated
 
             if terminated:
@@ -106,7 +111,6 @@ if current_mode == MODE.TRAIN:
 
             cumulated_reward += reward
             # Store the transition in memory
-            action = torch.tensor([[action]], device=device, dtype=torch.long)
             reward = torch.tensor([reward], device=device)
             manager.memory.push(state, action, next_state, reward)
 
@@ -127,17 +131,20 @@ if current_mode == MODE.TRAIN:
                     stats = manager.get_stats()
                     print(f"Mean duration: {stats[0]}, Mean reward: {stats[1]}")
 
-                wandb.log({"episode_num": i_episode, "total_reward": cumulated_reward, "episode_duration": t+1})
+                if wandb_use:
+                    wandb.log({"episode_num": i_episode, "total_reward": cumulated_reward, "episode_duration": t+1})
 
-                if(current_policy == Policy.DDPG):
-                    wandb.log({"mean_critic_loss": stats[2], "mean_actor_loss": stats[3]})
+                    if(current_policy == Policy.DDPG):
+                        wandb.log({"mean_critic_loss": stats[2], "mean_actor_loss": stats[3]})
                 
                 # manager.hard_update()
                 break
 
     print('Complete')
     manager.save_model()
-    wandb.finish()
+
+    if wandb_use:
+        wandb.finish()
 
 elif current_mode == MODE.TEST:
 

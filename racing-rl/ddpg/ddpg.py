@@ -1,5 +1,7 @@
 import torch.nn as nn
 import torch.nn.functional as F
+
+import torch
     
 class Actor_CNN(nn.Module):
 
@@ -50,19 +52,22 @@ class Critic_CNN(nn.Module):
         ])
 
         self.linear = nn.ModuleList([
-            nn.Linear(latent_dim + n_actions, 256),
+            nn.Linear(latent_dim + n_actions, 128),
             nn.ReLU(),
-            nn.Linear(256, n_actions),
-            nn.Tanh()
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Linear(64, 1)
         ])
 
     # Called with either one element to determine next action, or a batch
     # during optimization. Returns tensor([[left0exp,right0exp]...]).
-    def forward(self, x):
+    def forward(self, x, u):
         # print(x.shape)
         for layer in self.encoder_cnn:
             x = layer(x)
         x = x.view(-1, 10 * 9 * 9)
-        for layer in self.linear:
-            x = layer(x)
+        x = torch.cat([x, u], 1)
+        x = self.linear[0](x)
+        for i in range(1, len(self.linear)):
+            x = self.linear[i](x)
         return x

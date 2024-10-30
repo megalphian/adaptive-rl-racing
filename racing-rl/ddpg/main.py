@@ -1,5 +1,6 @@
 from ddpg.ddpg import Actor_CNN, Critic_CNN
 from core.replay_buffer import ReplayMemory, Transition
+from core.noise_generator import NoiseGenerator
 
 import torch
 import torch.nn as nn
@@ -7,8 +8,7 @@ import torch.optim as optim
 
 import math
 import random
-
-import matplotlib.pyplot as plt
+import numpy as np
 
 # BATCH_SIZE is the number of transitions sampled from the replay buffer
 # GAMMA is the discount factor as mentioned in the previous section
@@ -36,21 +36,21 @@ class DDPGManager:
     def __init__(self, env):
         self.env = env
         # Get number of actions from gym action space
-        n_actions = env.action_space.n
+        self.n_actions = env.action_space.shape[0]
         # Get the number of state observations
         state, info = env.reset()
         n_observations = state.shape
 
         self.memory = ReplayMemory(10000)
 
-        self.actor_net = Actor_CNN(n_observations, n_actions).to(device)
-        self.actor_target = Actor_CNN(n_observations, n_actions).to(device)
+        self.actor_net = Actor_CNN(n_observations, self.n_actions).to(device)
+        self.actor_target = Actor_CNN(n_observations, self.n_actions).to(device)
         self.actor_target.load_state_dict(self.actor_net.state_dict())
         self.actor_optimizer = optim.AdamW(self.actor_net.parameters(), lr=LR, amsgrad=True)
         self.actor_loss = []
 
-        self.critic_net = Critic_CNN(n_observations, n_actions).to(device)
-        self.critic_target = Critic_CNN(n_observations, n_actions).to(device)
+        self.critic_net = Critic_CNN(n_observations, self.n_actions).to(device)
+        self.critic_target = Critic_CNN(n_observations, self.n_actions).to(device)
         self.critic_target.load_state_dict(self.critic_net.state_dict())
         self.critic_optimizer = optim.AdamW(self.critic_net.parameters(), lr=LR, amsgrad=True)
         self.critic_loss = []
@@ -60,23 +60,28 @@ class DDPGManager:
 
         self.steps_done = 0
 
+        noise_mean = np.full(self.n_actions, 0.0, np.float32)
+        noise_std  = np.full(self.n_actions, 0.2, np.float32)
+        self.noise_generator = NoiseGenerator(noise_mean, noise_std) 
+
     def select_greedy_action(self, state):
         with torch.no_grad():
-            return self.actor_net(state).max(1)[1].view(1, 1)
+            return self.actor_net(state)[0]
 
     def select_action(self, state):
         sample = random.random()
         eps_threshold = EPS_END + (EPS_START - EPS_END) * \
             math.exp(-1. * self.steps_done / EPS_DECAY)
         self.steps_done += 1
-        if sample > eps_threshold:
-            with torch.no_grad():
-                # t.max(1) will return the largest column value of each row.
-                # second column on max result is index of where max element was
-                # found, so we pick action with the larger expected reward.
-                return self.actor_net(state).max(1)[1].view(1, 1)
-        else:
-            return torch.tensor([[self.env.action_space.sample()]], device=device, dtype=torch.long)
+        action = self.select_greedy_action(state).cpu().numpy()
+        if sample <= eps_threshold:
+            # Exploration
+            action = action + self.noise_generator.generate()
+        
+        return self.encode_action(action)
+            
+    def encode_action(self, action):
+        return torch.tensor([action[0], action[1].clip(0,1), action[2].clip(0,1)], device=device, dtype=torch.float32)
 
     def get_stats(self):
         # Get the mean duration and rewards of the last 100 episodes
@@ -102,7 +107,7 @@ class DDPGManager:
         non_final_next_states = torch.stack([s for s in batch.next_state
                                                     if s is not None])
         state_batch = torch.stack(batch.state)
-        action_batch = torch.cat(batch.action)
+        action_batch = torch.stack(batch.action)
         reward_batch = torch.cat(batch.reward)
 
         # Compute Q(s_t, a) using critic network
@@ -111,7 +116,8 @@ class DDPGManager:
         # Compute Q'(s_{t+1}, a) for all next states.
         next_state_values = torch.zeros(BATCH_SIZE, device=device)
         with torch.no_grad():
-            next_state_values[non_final_mask] = self.critic_target(non_final_next_states, self.actor_target(non_final_next_states)).squeeze()
+            target_val = self.critic_target(non_final_next_states, self.actor_target(non_final_next_states))
+            next_state_values[non_final_mask] = target_val.squeeze()
         # Compute the expected Q values
         expected_state_action_values = (next_state_values * GAMMA) + reward_batch
 
