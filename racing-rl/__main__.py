@@ -9,7 +9,10 @@ import matplotlib
 
 import torch
 
-from dqn.main import DQNManager, SkipFrame
+from dqn.main import DQNManager
+from ddpg.main import DDPGManager
+
+from core.skip_frame import SkipFrame
 
 from enum import Enum
 
@@ -19,15 +22,22 @@ class MODE(Enum):
     TRAIN = 0
     TEST = 1
 
-current_mode = MODE.TEST
+class Policy(Enum):
+    DQN = 0
+    DDPG = 1
+
+current_mode = MODE.TRAIN
+current_policy = Policy.DDPG
 
 # Initialise the environment
 if current_mode == MODE.TRAIN:
     # env = gym.make("CartPole-v1")
-    env = gym.make("CarRacing-v3", continuous=False)
+    # env = gym.make("CarRacing-v3", continuous=False)
+    env = gym.make("CarRacing-v3")
 elif current_mode == MODE.TEST:
     # env = gym.make("CartPole-v1", render_mode="human")
-    env = gym.make("CarRacing-v3", render_mode="human", continuous=False)
+    # env = gym.make("CarRacing-v3", render_mode="human", continuous=False)
+    env = gym.make("CarRacing-v3", render_mode="human")
 
 env = SkipFrame(env, skip=4)
 env = gym_wrap.GrayscaleObservation(env)
@@ -68,8 +78,16 @@ if current_mode == MODE.TRAIN:
     else:
         num_episodes = 50
 
-    manager = DQNManager(env)
+    # Overload for testing the code
+    num_episodes = 20
 
+    if current_policy == Policy.DQN:
+        manager = DQNManager(env)
+    elif current_policy == Policy.DDPG:
+        manager = DDPGManager(env)
+    else:
+        raise ValueError("Policy not supported")
+    
     for i_episode in range(num_episodes):
         # Initialize the environment and get its state
         state, info = env.reset()
@@ -98,9 +116,6 @@ if current_mode == MODE.TRAIN:
             if timestep_n % when2learn == 0:
                 manager.optimize_model()
                 manager.soft_update()
-            
-            if timestep_n % when2sync == 0:
-                manager.hard_update()
 
             # Perform one step of the optimization (on the policy network)
             
@@ -113,14 +128,15 @@ if current_mode == MODE.TRAIN:
                     print(f"Mean duration: {stats[0]}, Mean reward: {stats[1]}")
 
                 wandb.log({"episode_num": i_episode, "total_reward": cumulated_reward, "episode_duration": t+1})
+
+                if(current_policy == Policy.DDPG):
+                    wandb.log({"mean_critic_loss": stats[2], "mean_actor_loss": stats[3]})
                 
                 # manager.hard_update()
                 break
 
     print('Complete')
-
-    # save the model
-    torch.save(manager.policy_net.state_dict(), "model.pth")
+    manager.save_model()
     wandb.finish()
 
 elif current_mode == MODE.TEST:

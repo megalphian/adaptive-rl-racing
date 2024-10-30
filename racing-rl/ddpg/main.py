@@ -1,4 +1,4 @@
-from dqn.dqn import DQN_CNN
+from ddpg.ddpg import Actor_CNN, Critic_CNN
 from core.replay_buffer import ReplayMemory, Transition
 
 import torch
@@ -31,7 +31,7 @@ device = torch.device(
     "cpu"
 )
 
-class DQNManager:
+class DDPGManager:
 
     def __init__(self, env):
         self.env = env
@@ -41,12 +41,19 @@ class DQNManager:
         state, info = env.reset()
         n_observations = state.shape
 
-        self.policy_net = DQN_CNN(n_observations, n_actions).to(device)
-        self.target_net = DQN_CNN(n_observations, n_actions).to(device)
-        self.target_net.load_state_dict(self.policy_net.state_dict())
-
-        self.optimizer = optim.AdamW(self.policy_net.parameters(), lr=LR, amsgrad=True)
         self.memory = ReplayMemory(10000)
+
+        self.actor_net = Actor_CNN(n_observations, n_actions).to(device)
+        self.actor_target = Actor_CNN(n_observations, n_actions).to(device)
+        self.actor_target.load_state_dict(self.actor_net.state_dict())
+        self.actor_optimizer = optim.AdamW(self.actor_net.parameters(), lr=LR, amsgrad=True)
+        self.actor_loss = []
+
+        self.critic_net = Critic_CNN(n_observations, n_actions).to(device)
+        self.critic_target = Critic_CNN(n_observations, n_actions).to(device)
+        self.critic_target.load_state_dict(self.critic_net.state_dict())
+        self.critic_optimizer = optim.AdamW(self.critic_net.parameters(), lr=LR, amsgrad=True)
+        self.critic_loss = []
 
         self.episode_durations = []
         self.rewards = []
@@ -55,7 +62,7 @@ class DQNManager:
 
     def select_greedy_action(self, state):
         with torch.no_grad():
-            return self.policy_net(state).max(1)[1].view(1, 1)
+            return self.actor_net(state).max(1)[1].view(1, 1)
 
     def select_action(self, state):
         sample = random.random()
@@ -67,7 +74,7 @@ class DQNManager:
                 # t.max(1) will return the largest column value of each row.
                 # second column on max result is index of where max element was
                 # found, so we pick action with the larger expected reward.
-                return self.policy_net(state).max(1)[1].view(1, 1)
+                return self.actor_net(state).max(1)[1].view(1, 1)
         else:
             return torch.tensor([[self.env.action_space.sample()]], device=device, dtype=torch.long)
 
@@ -75,26 +82,9 @@ class DQNManager:
         # Get the mean duration and rewards of the last 100 episodes
         mean_duration = sum(self.episode_durations[-100:])/len(self.episode_durations[-100:])
         mean_reward = sum(self.rewards[-100:])/len(self.rewards[-100:])
-        return mean_duration, mean_reward
-
-    def plot_durations(self, show_result=False):
-        plt.figure(1)
-        durations_t = torch.tensor(self.episode_durations, dtype=torch.float)
-        if show_result:
-            plt.title('Result')
-        else:
-            plt.clf()
-            plt.title('Training...')
-        plt.xlabel('Episode')
-        plt.ylabel('Duration')
-        plt.plot(durations_t.numpy())
-        # Take 100 episode averages and plot them too
-        if len(durations_t) >= 100:
-            means = durations_t.unfold(0, 100, 1).mean(1).view(-1)
-            means = torch.cat((torch.zeros(99), means))
-            plt.plot(means.numpy())
-
-        plt.pause(0.001)  # pause a bit so that plots are updated
+        mean_critic_loss = sum(self.critic_loss[-100:])/len(self.critic_loss[-100:])
+        mean_actor_loss = sum(self.actor_loss[-100:])/len(self.actor_loss[-100:])
+        return mean_duration, mean_reward, mean_critic_loss, mean_actor_loss
 
     def optimize_model(self):
         if len(self.memory) < BATCH_SIZE:
@@ -115,45 +105,54 @@ class DQNManager:
         action_batch = torch.cat(batch.action)
         reward_batch = torch.cat(batch.reward)
 
-        # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
-        # columns of actions taken. These are the actions which would've been taken
-        # for each batch state according to policy_net
-        state_action_values = self.policy_net(state_batch).gather(1, action_batch)
+        # Compute Q(s_t, a) using critic network
+        state_action_values = self.critic_net(state_batch, action_batch)
 
-        # Compute V(s_{t+1}) for all next states.
-        # Expected values of actions for non_final_next_states are computed based
-        # on the "older" target_net; selecting their best reward with max(1).values
-        # This is merged based on the mask, such that we'll have either the expected
-        # state value or 0 in case the state was final.
+        # Compute Q'(s_{t+1}, a) for all next states.
         next_state_values = torch.zeros(BATCH_SIZE, device=device)
         with torch.no_grad():
-            next_state_values[non_final_mask] = self.target_net(non_final_next_states).max(1).values
+            next_state_values[non_final_mask] = self.critic_target(non_final_next_states, self.actor_target(non_final_next_states)).squeeze()
         # Compute the expected Q values
         expected_state_action_values = (next_state_values * GAMMA) + reward_batch
 
         # Compute Huber loss
         criterion = nn.SmoothL1Loss()
-        loss = criterion(state_action_values, expected_state_action_values.unsqueeze(1))
+        critic_loss = criterion(state_action_values, expected_state_action_values.unsqueeze(1))
+        self.critic_loss.append(critic_loss.item())
 
         # Optimize the model
-        self.optimizer.zero_grad()
-        loss.backward()
+        self.critic_optimizer.zero_grad()
+        critic_loss.backward()
         # In-place gradient clipping
-        torch.nn.utils.clip_grad_value_(self.policy_net.parameters(), 100)
-        self.optimizer.step()
+        torch.nn.utils.clip_grad_value_(self.critic_net.parameters(), 100)
+        self.critic_optimizer.step()
+
+        # Compute actor loss
+        # Source: https://github.com/lzhan144/Solving-CarRacing-with-DDPG/blob/master/DDPG.py
+        # The actor is trained to maximize the expected return of the critic  
+        actor_loss = -self.critic_net(state_batch, self.actor_net(state_batch)).mean()
+        self.actor_loss.append(actor_loss.item())
+
+        self.actor_optimizer.zero_grad()
+        actor_loss.backward()
+        # In-place gradient clipping
+        torch.nn.utils.clip_grad_value_(self.actor_net.parameters(), 100)
+        self.actor_optimizer.step()
 
     def soft_update(self):
         # Soft update of the target network's weights
         # θ′ ← τ θ + (1 −τ )θ′
-        target_net_state_dict = self.target_net.state_dict()
-        policy_net_state_dict = self.policy_net.state_dict()
-        for key in policy_net_state_dict:
-            target_net_state_dict[key] = policy_net_state_dict[key]*TAU + target_net_state_dict[key]*(1-TAU)
-        self.target_net.load_state_dict(target_net_state_dict)
+        for target_param, param in zip(self.actor_target.parameters(), self.actor_net.parameters()):
+            target_param.data.copy_(TAU * param.data + (1 - TAU) * target_param.data)
+        
+        for target_param, param in zip(self.critic_target.parameters(), self.critic_net.parameters()):
+            target_param.data.copy_(TAU * param.data + (1 - TAU) * target_param.data)
 
     def hard_update(self):
         # Hard update of the target network's weights
         self.target_net.load_state_dict(self.policy_net.state_dict())
-    
+
     def save_model(self):
-        torch.save(self.policy_net.state_dict(), "model.pth")
+        # save the model
+        torch.save(self.actor_net.state_dict(), 'actor.pth')
+        torch.save(self.critic_net.state_dict(), 'critic.pth')
