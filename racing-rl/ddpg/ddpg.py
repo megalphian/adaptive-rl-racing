@@ -59,10 +59,7 @@ class Critic_CNN(nn.Module):
             nn.Linear(64, 1)
         ])
 
-    # Called with either one element to determine next action, or a batch
-    # during optimization. Returns tensor([[left0exp,right0exp]...]).
     def forward(self, x, u):
-        # print(x.shape)
         for layer in self.encoder_cnn:
             x = layer(x)
         x = x.view(-1, self.latent_dim)

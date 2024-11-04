@@ -76,14 +76,12 @@ class DDPGManager:
         self.steps_done += 1
         with torch.no_grad():
             action = self.actor_net(state)[0].cpu().numpy()
-        action = action + self.noise_generator.generate(std_dev_factor=eps_threshold)
+        if random.random() < eps_threshold:
+            action = action + self.noise_generator.generate()
         
         print(action)
-        self.noise_generator.reset()
+        # self.noise_generator.reset()
         return torch.tensor(action, device=device, dtype=torch.float32)
-            
-    def encode_action(self, action):
-        return torch.tensor([action[0], abs(action[1]).clip(0,1), abs(action[2]).clip(0,1)], device=device, dtype=torch.float32)
     
     def reset(self):
         self.noise_generator.reset()
@@ -130,12 +128,13 @@ class DDPGManager:
 
         # Compute Huber loss
         criterion = nn.MSELoss()
-        critic_loss = criterion(state_action_values, expected_state_action_values.unsqueeze(1))
+        critic_loss = criterion(state_action_values, expected_state_action_values)
         self.critic_loss.append(critic_loss.item())
 
         # Optimize the model
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
+        torch.nn.utils.clip_grad_value_(self.critic_net.parameters(), 100)
         self.critic_optimizer.step()
 
         # Compute actor loss
@@ -146,6 +145,7 @@ class DDPGManager:
 
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
+        torch.nn.utils.clip_grad_value_(self.actor_net.parameters(), 100)
         self.actor_optimizer.step()
 
     def soft_update(self):

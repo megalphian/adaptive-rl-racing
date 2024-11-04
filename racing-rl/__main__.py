@@ -26,24 +26,26 @@ class Policy(Enum):
     DQN = 0
     DDPG = 1
 
-current_mode = MODE.TRAIN
-current_policy = Policy.DDPG
+current_mode = MODE.TEST
+current_policy = Policy.DQN
 wandb_use = False
+
+continous = False
+if(current_policy == Policy.DDPG):
+    continous = True
 
 # Initialise the environment
 if current_mode == MODE.TRAIN:
     # env = gym.make("CartPole-v1")
-    # env = gym.make("CarRacing-v3", continuous=False)
-    env = gym.make("CarRacing-v3", render_mode="human")
+    env = gym.make("CarRacing-v2", continuous=continous)
 elif current_mode == MODE.TEST:
     # env = gym.make("CartPole-v1", render_mode="human")
-    # env = gym.make("CarRacing-v3", render_mode="human", continuous=False)
-    env = gym.make("CarRacing-v3", render_mode="human")
+    env = gym.make("CarRacing-v2", render_mode="human", continuous=continous)
 
 env = SkipFrame(env, skip=4)
-env = gym_wrap.GrayscaleObservation(env)
+env = gym_wrap.GrayScaleObservation(env)
 env = gym_wrap.ResizeObservation(env, (84, 84))
-env = gym_wrap.FrameStackObservation(env, stack_size=4)
+env = gym_wrap.FrameStack(env, 4)
 
 device = torch.device(
     "cuda" if torch.cuda.is_available() else
