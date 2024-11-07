@@ -84,9 +84,7 @@ class DDPGManager:
     
     def reset(self):
         self.noise_generator.reset()
-        self.critic_loss = []
-        self.actor_loss = []
-
+        
     def get_stats(self):
         # Get the mean duration and rewards of the last 100 episodes
         mean_duration = sum(self.episode_durations[-100:])/len(self.episode_durations[-100:])

@@ -59,6 +59,7 @@ timestep_n = 0
 when2learn = 4 # in timesteps
 when2sync = 5000 # in timesteps
 when2save = 100000 # in timesteps
+when2reset = 100000 # in timesteps
 
 if current_mode == MODE.TRAIN:
 
@@ -93,7 +94,6 @@ if current_mode == MODE.TRAIN:
         for i_episode in range(num_episodes):
             # Initialize the environment and get its state
             state, info = env.reset()
-            manager.reset()
             state = torch.tensor(state, dtype=torch.float32, device=device)
             cumulated_reward = 0
             for t in count():
@@ -121,6 +121,9 @@ if current_mode == MODE.TRAIN:
                 if timestep_n % when2learn == 0:
                     manager.optimize_model()
                     manager.soft_update()
+
+                if timestep_n % when2reset == 0:
+                    manager.reset()
 
                 # Perform one step of the optimization (on the policy network)
                 
