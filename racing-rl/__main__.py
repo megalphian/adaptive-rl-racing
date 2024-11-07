@@ -26,9 +26,9 @@ class Policy(Enum):
     DQN = 0
     DDPG = 1
 
-current_mode = MODE.TEST
-current_policy = Policy.DQN
-wandb_use = False
+current_mode = MODE.TRAIN
+current_policy = Policy.DDPG
+wandb_use = True
 
 continous = False
 if(current_policy == Policy.DDPG):
@@ -37,15 +37,15 @@ if(current_policy == Policy.DDPG):
 # Initialise the environment
 if current_mode == MODE.TRAIN:
     # env = gym.make("CartPole-v1")
-    env = gym.make("CarRacing-v2", continuous=continous)
+    env = gym.make("CarRacing-v3", continuous=continous)
 elif current_mode == MODE.TEST:
     # env = gym.make("CartPole-v1", render_mode="human")
-    env = gym.make("CarRacing-v2", render_mode="human", continuous=continous)
+    env = gym.make("CarRacing-v3", render_mode="human", continuous=continous)
 
 env = SkipFrame(env, skip=4)
-env = gym_wrap.GrayScaleObservation(env)
+env = gym_wrap.GrayscaleObservation(env)
 env = gym_wrap.ResizeObservation(env, (84, 84))
-env = gym_wrap.FrameStack(env, 4)
+env = gym_wrap.FrameStackObservation(env, stack_size=4)
 
 device = torch.device(
     "cuda" if torch.cuda.is_available() else
@@ -78,7 +78,7 @@ if current_mode == MODE.TRAIN:
         )
 
     if torch.cuda.is_available() or torch.backends.mps.is_available():
-        num_episodes = 2000
+        num_episodes = 3000
     else:
         num_episodes = 50
 
@@ -168,7 +168,6 @@ elif current_mode == MODE.TEST:
     for t in count():
         # env.render()
         action = manager.select_greedy_action(state)
-        print(action)
         if(current_policy == Policy.DDPG):
             observation, reward, terminated, truncated, _ = env.step(action.cpu().numpy())
         else:

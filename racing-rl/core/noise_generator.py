@@ -25,7 +25,7 @@ class NoiseGenerator:
 
     def generate(self, std_dev_factor=None):
         if std_dev_factor is not None:
-            self.std_dev[0] = self.std_dev[0] * std_dev_factor
+            self.std_dev[0] = std_dev_factor
             self.std_dev[1] = std_dev_factor
             self.std_dev[2] = std_dev_factor
 

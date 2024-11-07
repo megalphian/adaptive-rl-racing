@@ -41,7 +41,7 @@ class DDPGManager:
         state, info = env.reset()
         n_observations = state.shape
 
-        self.memory = ReplayMemory(10000)
+        self.memory = ReplayMemory(100000)
 
         self.actor_net = Actor_CNN(n_observations, self.n_actions).to(device)
         self.actor_target = Actor_CNN(n_observations, self.n_actions).to(device)
@@ -76,10 +76,9 @@ class DDPGManager:
         self.steps_done += 1
         with torch.no_grad():
             action = self.actor_net(state)[0].cpu().numpy()
-        if random.random() < eps_threshold:
-            action = action + self.noise_generator.generate()
         
-        print(action)
+        action = action + self.noise_generator.generate()
+        
         # self.noise_generator.reset()
         return torch.tensor(action, device=device, dtype=torch.float32)
     
@@ -128,6 +127,8 @@ class DDPGManager:
 
         # Compute Huber loss
         criterion = nn.MSELoss()
+        state_action_values = state_action_values.squeeze()
+
         critic_loss = criterion(state_action_values, expected_state_action_values)
         self.critic_loss.append(critic_loss.item())
 
