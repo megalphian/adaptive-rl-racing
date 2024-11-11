@@ -2,6 +2,8 @@ from ddpg.ddpg import Actor_CNN, Critic_CNN
 from core.replay_buffer import ReplayMemory, Transition
 from core.noise_generator import NoiseGenerator
 
+from collections import deque
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -47,16 +49,16 @@ class DDPGManager:
         self.actor_target = Actor_CNN(n_observations, self.n_actions).to(device)
         self.actor_target.load_state_dict(self.actor_net.state_dict())
         self.actor_optimizer = optim.AdamW(self.actor_net.parameters(), lr=LR, amsgrad=True)
-        self.actor_loss = []
+        self.actor_loss = deque(maxlen=100)
 
         self.critic_net = Critic_CNN(n_observations, self.n_actions).to(device)
         self.critic_target = Critic_CNN(n_observations, self.n_actions).to(device)
         self.critic_target.load_state_dict(self.critic_net.state_dict())
         self.critic_optimizer = optim.AdamW(self.critic_net.parameters(), lr=LR, amsgrad=True)
-        self.critic_loss = []
+        self.critic_loss = deque(maxlen=100)
 
-        self.episode_durations = []
-        self.rewards = []
+        self.episode_durations = deque(maxlen=100)
+        self.rewards = deque(maxlen=100)
 
         self.steps_done = 0
 
@@ -73,13 +75,21 @@ class DDPGManager:
     def select_action(self, state):
         eps_threshold = EPS_END + (EPS_START - EPS_END) * \
             math.exp(-1. * self.steps_done / EPS_DECAY)
+        if random.random() > eps_threshold:
+            self.noise_generator.reset()
+
         self.steps_done += 1
         with torch.no_grad():
             action = self.actor_net(state)[0].cpu().numpy()
         
-        action = action + self.noise_generator.generate()
+        noise = self.noise_generator.generate()
+        # print(f"Action: {action}, Noise: {noise}")
+        action = action + noise
+
+        action[0] = np.clip(action[0], -1, 1)
+        action[1] = np.clip(action[1], 0, 1)
+        action[2] = np.clip(action[2], 0, 1)
         
-        # self.noise_generator.reset()
         return torch.tensor(action, device=device, dtype=torch.float32)
     
     def reset(self):
@@ -87,10 +97,10 @@ class DDPGManager:
         
     def get_stats(self):
         # Get the mean duration and rewards of the last 100 episodes
-        mean_duration = sum(self.episode_durations[-100:])/len(self.episode_durations[-100:])
-        mean_reward = sum(self.rewards[-100:])/len(self.rewards[-100:])
-        mean_critic_loss = sum(self.critic_loss[-100:])/len(self.critic_loss[-100:])
-        mean_actor_loss = sum(self.actor_loss[-100:])/len(self.actor_loss[-100:])
+        mean_duration = sum(self.episode_durations)/len(self.episode_durations)
+        mean_reward = sum(self.rewards)/len(self.rewards)
+        mean_critic_loss = sum(self.critic_loss)/len(self.critic_loss)    
+        mean_actor_loss = sum(self.actor_loss)/len(self.actor_loss)
         return mean_duration, mean_reward, mean_critic_loss, mean_actor_loss
 
     def optimize_model(self):
@@ -124,27 +134,27 @@ class DDPGManager:
         expected_state_action_values = (next_state_values * GAMMA) + reward_batch
 
         # Compute Huber loss
-        criterion = nn.MSELoss()
         state_action_values = state_action_values.squeeze()
 
-        critic_loss = criterion(state_action_values, expected_state_action_values)
-        self.critic_loss.append(critic_loss.item())
+        critic_loss = (state_action_values - expected_state_action_values).pow(2).mean()
+        self.critic_loss.append(critic_loss)
 
         # Optimize the model
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
-        torch.nn.utils.clip_grad_value_(self.critic_net.parameters(), 100)
+        # torch.nn.utils.clip_grad_value_(self.critic_net.parameters(), 100)
         self.critic_optimizer.step()
 
         # Compute actor loss
         # Source: https://github.com/lzhan144/Solving-CarRacing-with-DDPG/blob/master/DDPG.py
         # The actor is trained to maximize the expected return of the critic  
-        actor_loss = -self.critic_net(state_batch, self.actor_net(state_batch)).mean()
-        self.actor_loss.append(actor_loss.item())
+        actions_from_net = self.actor_net(state_batch)
+        actor_loss = -self.critic_net(state_batch, actions_from_net).mean()
+        self.actor_loss.append(actor_loss)
 
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
-        torch.nn.utils.clip_grad_value_(self.actor_net.parameters(), 100)
+        # torch.nn.utils.clip_grad_value_(self.actor_net.parameters(), 100)
         self.actor_optimizer.step()
 
     def soft_update(self):
@@ -170,7 +180,8 @@ class DDPGManager:
 
     def hard_update(self):
         # Hard update of the target network's weights
-        pass
+        self.actor_target.load_state_dict(self.actor_net.state_dict())
+        self.critic_target.load_state_dict(self.critic_net.state_dict())
 
     def save_model(self):
         # save the model

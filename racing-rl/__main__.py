@@ -56,10 +56,8 @@ device = torch.device(
 obs, _ = env.reset()
 
 timestep_n = 0
-when2learn = 4 # in timesteps
+when2learn = 2 # in timesteps
 when2sync = 5000 # in timesteps
-when2save = 100000 # in timesteps
-when2reset = 100000 # in timesteps
 
 if current_mode == MODE.TRAIN:
 
@@ -67,15 +65,16 @@ if current_mode == MODE.TRAIN:
         # start a new wandb run to track this script
         wandb.init(
             # set the wandb project where this run will be logged
-            project="my-awesome-project",
-
+            project="adaptive-rl",
+            name="DDPG-Test",
+            
             # track hyperparameters and run metadata
             config={
-            "learning_rate": 0.02,
-            "architecture": "CNN",
+            "learning_rate": 0.001,
+            "architecture": "DDPG",
             "dataset": "CIFAR-100",
             "epochs": 10,
-            }
+            },
         )
 
     if torch.cuda.is_available() or torch.backends.mps.is_available():
@@ -118,14 +117,12 @@ if current_mode == MODE.TRAIN:
                 # Move to the next state
                 state = next_state
 
+                manager.optimize_model()
+
                 if timestep_n % when2learn == 0:
-                    manager.optimize_model()
                     manager.soft_update()
 
-                if timestep_n % when2reset == 0:
-                    manager.reset()
-
-                # Perform one step of the optimization (on the policy network)
+                #### Perform one step of the optimization (on the policy network)
                 
                 if done:
                     manager.episode_durations.append(t + 1)
