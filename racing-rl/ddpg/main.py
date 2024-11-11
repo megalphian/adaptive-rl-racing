@@ -19,7 +19,7 @@ import numpy as np
 # EPS_DECAY controls the rate of exponential decay of epsilon, higher means a slower decay
 # TAU is the update rate of the target network
 # LR is the learning rate of the ``AdamW`` optimizer
-BATCH_SIZE = 32
+BATCH_SIZE = 64
 GAMMA = 0.99
 EPS_START = 0.9
 EPS_END = 0.05
@@ -32,6 +32,7 @@ device = torch.device(
     "mps" if torch.backends.mps.is_available() else
     "cpu"
 )
+cpu_device = torch.device("cpu")
 
 class DDPGManager:
 
@@ -43,7 +44,7 @@ class DDPGManager:
         state, info = env.reset()
         n_observations = state.shape
 
-        self.memory = ReplayMemory(100000)
+        self.memory = ReplayMemory(50000)
 
         self.actor_net = Actor_CNN(n_observations, self.n_actions).to(device)
         self.actor_target = Actor_CNN(n_observations, self.n_actions).to(device)
@@ -63,43 +64,33 @@ class DDPGManager:
         self.steps_done = 0
 
         noise_mean = np.full(self.n_actions, 0.0, np.float32)
-        noise_std  = np.full(self.n_actions, 0.2, np.float32)
+        noise_std  = np.array([0.5, 0.2, 0.2], np.float32)
         self.noise_generator = NoiseGenerator(noise_mean, noise_std)
-
-        self.reset() 
 
     def select_greedy_action(self, state):
         with torch.no_grad():
             return self.actor_net(state)[0]
 
     def select_action(self, state):
-        eps_threshold = EPS_END + (EPS_START - EPS_END) * \
-            math.exp(-1. * self.steps_done / EPS_DECAY)
-        if random.random() > eps_threshold:
-            self.noise_generator.reset()
-
         self.steps_done += 1
+        state = state.to(device)
         with torch.no_grad():
             action = self.actor_net(state)[0].cpu().numpy()
         
         noise = self.noise_generator.generate()
-        # print(f"Action: {action}, Noise: {noise}")
         action = action + noise
 
         action[0] = np.clip(action[0], -1, 1)
         action[1] = np.clip(action[1], 0, 1)
         action[2] = np.clip(action[2], 0, 1)
         
-        return torch.tensor(action, device=device, dtype=torch.float32)
-    
-    def reset(self):
-        self.noise_generator.reset()
+        return torch.tensor(action, device=cpu_device, dtype=torch.float32)
         
     def get_stats(self):
         # Get the mean duration and rewards of the last 100 episodes
         mean_duration = sum(self.episode_durations)/len(self.episode_durations)
         mean_reward = sum(self.rewards)/len(self.rewards)
-        mean_critic_loss = sum(self.critic_loss)/len(self.critic_loss)    
+        mean_critic_loss = sum(self.critic_loss)/len(self.critic_loss)
         mean_actor_loss = sum(self.actor_loss)/len(self.actor_loss)
         return mean_duration, mean_reward, mean_critic_loss, mean_actor_loss
 
@@ -117,10 +108,10 @@ class DDPGManager:
         non_final_mask = torch.tensor(tuple(map(lambda s: s is not None,
                                             batch.next_state)), device=device, dtype=torch.bool)
         non_final_next_states = torch.stack([s for s in batch.next_state
-                                                    if s is not None])
-        state_batch = torch.stack(batch.state)
-        action_batch = torch.stack(batch.action)
-        reward_batch = torch.cat(batch.reward)
+                                                    if s is not None]).to(device)
+        state_batch = torch.stack(batch.state).to(device)
+        action_batch = torch.stack(batch.action).to(device)
+        reward_batch = torch.cat(batch.reward).to(device)
 
         # Compute Q(s_t, a) using critic network
         state_action_values = self.critic_net(state_batch, action_batch)
@@ -166,22 +157,11 @@ class DDPGManager:
         # for target_param, param in zip(self.critic_target.parameters(), self.critic_net.parameters()):
         #     target_param.data.copy_(TAU * param.data + (1 - TAU) * target_param.data)
 
-        target_net_state_dict = self.actor_target.state_dict()
-        policy_net_state_dict = self.actor_net.state_dict()
-        for key in policy_net_state_dict:
-            target_net_state_dict[key] = policy_net_state_dict[key]*TAU + target_net_state_dict[key]*(1-TAU)
-        self.actor_target.load_state_dict(target_net_state_dict)
-        
-        target_net_state_dict = self.critic_target.state_dict()
-        policy_net_state_dict = self.critic_net.state_dict()
-        for key in policy_net_state_dict:
-            target_net_state_dict[key] = policy_net_state_dict[key]*TAU + target_net_state_dict[key]*(1-TAU)
-        self.critic_target.load_state_dict(target_net_state_dict)
+        for target_param, param in zip(self.actor_target.parameters(), self.actor_net.parameters()):
+            target_param.data = TAU * param.data + (1 - TAU) * target_param.data
 
-    def hard_update(self):
-        # Hard update of the target network's weights
-        self.actor_target.load_state_dict(self.actor_net.state_dict())
-        self.critic_target.load_state_dict(self.critic_net.state_dict())
+        for target_param, param in zip(self.critic_target.parameters(), self.critic_net.parameters()):
+            target_param.data = TAU * param.data + (1 - TAU) * target_param.data
 
     def save_model(self):
         # save the model

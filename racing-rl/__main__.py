@@ -37,14 +37,20 @@ if(current_policy == Policy.DDPG):
 # Initialise the environment
 if current_mode == MODE.TRAIN:
     # env = gym.make("CartPole-v1")
-    env = gym.make("CarRacing-v3", continuous=continous)
+    if wandb_use:
+        env = gym.make("CarRacing-v3", continuous=continous)
+    else:
+        env = gym.make("CarRacing-v3", continuous=continous, render_mode="human")
 elif current_mode == MODE.TEST:
     # env = gym.make("CartPole-v1", render_mode="human")
     env = gym.make("CarRacing-v3", render_mode="human", continuous=continous)
 
+
 env = SkipFrame(env, skip=4)
+
 env = gym_wrap.GrayscaleObservation(env)
 env = gym_wrap.ResizeObservation(env, (84, 84))
+
 env = gym_wrap.FrameStackObservation(env, stack_size=4)
 
 device = torch.device(
@@ -53,11 +59,14 @@ device = torch.device(
     "cpu"
 )
 
+cpu_device = torch.device("cpu")
+
 obs, _ = env.reset()
 
 timestep_n = 0
 when2learn = 2 # in timesteps
 when2sync = 5000 # in timesteps
+when2save = 10000 # in timesteps
 
 if current_mode == MODE.TRAIN:
 
@@ -66,7 +75,7 @@ if current_mode == MODE.TRAIN:
         wandb.init(
             # set the wandb project where this run will be logged
             project="adaptive-rl",
-            name="DDPG-Test",
+            name="DDPG-Test-2",
             
             # track hyperparameters and run metadata
             config={
@@ -93,13 +102,13 @@ if current_mode == MODE.TRAIN:
         for i_episode in range(num_episodes):
             # Initialize the environment and get its state
             state, info = env.reset()
-            state = torch.tensor(state, dtype=torch.float32, device=device)
+            state = torch.tensor(state, dtype=torch.float32, device=cpu_device)
             cumulated_reward = 0
             for t in count():
                 timestep_n += 1
                 action = manager.select_action(state)
                 if(current_policy == Policy.DDPG):
-                    observation, reward, terminated, truncated, _ = env.step(action.cpu().numpy())
+                    observation, reward, terminated, truncated, _ = env.step(action.numpy())
                 else:
                     observation, reward, terminated, truncated, _ = env.step(np.int64(action.item()))
                 done = terminated or truncated
@@ -107,11 +116,11 @@ if current_mode == MODE.TRAIN:
                 if terminated:
                     next_state = None
                 else:
-                    next_state = torch.tensor(observation, dtype=torch.float32, device=device)
+                    next_state = torch.tensor(observation, dtype=torch.float32, device=cpu_device)
 
                 cumulated_reward += reward
                 # Store the transition in memory
-                reward = torch.tensor([reward], device=device)
+                reward = torch.tensor([reward], device=cpu_device)
                 manager.memory.push(state, action, next_state, reward)
 
                 # Move to the next state
@@ -121,6 +130,9 @@ if current_mode == MODE.TRAIN:
 
                 if timestep_n % when2learn == 0:
                     manager.soft_update()
+
+                if timestep_n % when2save == 0:
+                    manager.save_model()
 
                 #### Perform one step of the optimization (on the policy network)
                 
@@ -138,10 +150,11 @@ if current_mode == MODE.TRAIN:
                         if(current_policy == Policy.DDPG):
                             wandb.log({"mean_critic_loss": stats[2], "mean_actor_loss": stats[3]})
                     
-                    # manager.hard_update()
                     break
     except KeyboardInterrupt:
         print("Training interrupted")
+    finally:
+        env.close()
 
     print('Complete')
     manager.save_model()

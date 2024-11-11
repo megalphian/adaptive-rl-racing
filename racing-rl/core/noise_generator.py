@@ -32,5 +32,5 @@ class NoiseGenerator:
                   + self.std_dev * np.sqrt(self.dt) * np.random.normal(size=self.x_shape))
         
         # TODO: check if decaying noise helps
-        # self.std_dev = self.std_dev * 0.9999
+        self.std_dev = self.std_dev * 0.9999
         return self.x

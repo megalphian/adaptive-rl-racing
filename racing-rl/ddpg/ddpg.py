@@ -2,7 +2,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 import torch
-    
+
+device = torch.device(
+    "cuda" if torch.cuda.is_available() else
+    "mps" if torch.backends.mps.is_available() else
+    "cpu"
+)
 class Actor_CNN(nn.Module):
 
     def __init__(self, n_observations, n_actions):
@@ -25,6 +30,9 @@ class Actor_CNN(nn.Module):
             nn.Tanh()
         ])
 
+        self.min_action = torch.tensor([-1, 0, 0]).to(device)
+        self.max_action = torch.tensor([1, 1, 1]).to(device)
+
     # Called with either one element to determine next action, or a batch
     # during optimization. Returns tensor([[left0exp,right0exp]...]).
     def forward(self, x):
@@ -34,6 +42,7 @@ class Actor_CNN(nn.Module):
         x = x.view(-1, self.latent_dim)
         for layer in self.linear:
             x = layer(x)
+        x = torch.clamp(x, self.min_action, self.max_action)
         return x
     
 class Critic_CNN(nn.Module):
