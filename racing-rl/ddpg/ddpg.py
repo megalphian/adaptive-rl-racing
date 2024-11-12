@@ -43,6 +43,7 @@ class Actor_CNN(nn.Module):
     def __init__(self, n_observations, n_actions):
         super(Actor_CNN, self).__init__()
         n_channels, width, height = n_observations
+        self.n_actions = n_actions
         self.latent_dim = 32*9*9
         self.encoder_cnn = nn.ModuleList([
             nn.Conv2d(n_channels, 16, kernel_size=5),
@@ -56,12 +57,9 @@ class Actor_CNN(nn.Module):
         self.linear = nn.ModuleList([
             nn.Linear(self.latent_dim, 256),
             nn.ReLU(),
-            nn.Linear(256, n_actions),
+            nn.Linear(256, self.n_actions),
             nn.Tanh()
         ])
-
-        self.min_action = torch.tensor([-1, 0, 0]).to(device)
-        self.max_action = torch.tensor([1, 1, 1]).to(device)
 
     # Called with either one element to determine next action, or a batch
     # during optimization. Returns tensor([[left0exp,right0exp]...]).
@@ -72,7 +70,6 @@ class Actor_CNN(nn.Module):
         x = x.view(-1, self.latent_dim)
         for layer in self.linear:
             x = layer(x)
-        x = torch.clamp(x, self.min_action, self.max_action)
         return x
     
 class Critic_CNN(nn.Module):
@@ -91,11 +88,11 @@ class Critic_CNN(nn.Module):
         ])
 
         self.linear = nn.ModuleList([
-            nn.Linear(self.latent_dim + n_actions, 256),
+            nn.Linear(self.latent_dim + n_actions, 128),
             nn.ReLU(),
-            nn.Linear(256, 128),
+            nn.Linear(128, 64),
             nn.ReLU(),
-            nn.Linear(128, 1)
+            nn.Linear(64, 1)
         ])
 
     def forward(self, x, u):

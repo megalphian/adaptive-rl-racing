@@ -41,6 +41,9 @@ class DDPGManager:
         self.env = env
         # Get number of actions from gym action space
         self.n_actions = env.action_space.shape[0]
+        if env_type == EnvMode.RACING:
+            self.n_actions -= 1
+
         # Get the number of state observations
         state, info = env.reset()
         n_observations = state.shape
@@ -79,25 +82,40 @@ class DDPGManager:
         noise_std  = np.full(self.n_actions, 0.2, np.float32)
         self.noise_generator = NoiseGenerator(noise_mean, noise_std)
 
+    def decode_model_output(self, model_out):
+        return np.array([model_out[0], model_out[1].clip(0, 1), -model_out[1].clip(-1, 0)])
+    
+    def encode_model_output(self, actions):
+        # actions is a tensor of shape (batch_size, n_actions)
+        # actions[:, 1] is the throttle value
+        # actions[:, 2] is the brake value
+        # We need to encode the throttle and brake values into a single action value
+        return torch.stack([actions[:, 0], actions[:, 1] - actions[:, 2]], dim=1)
+
     def select_greedy_action(self, state):
         state = state.to(device)
         with torch.no_grad():
-            return self.actor_net(state).cpu()
+            action = self.actor_net(state).cpu()
+        
+        if self.env_type == EnvMode.RACING:
+            action = self.decode_model_output(action)
+        
+        return action
 
     def select_action(self, state):
         self.steps_done += 1
         state = state.to(device)
         with torch.no_grad():
-            action = self.actor_net(state)[0].cpu().numpy()
+            action = self.actor_net(state).cpu()
+        
+        action = action.squeeze().numpy()
         
         noise = self.noise_generator.generate()
         action = action + noise
 
         if self.env_type == EnvMode.RACING:
-            action[0] = np.clip(action[0], -1, 1)
-            action[1] = np.clip(action[1], 0, 1)
-            action[2] = np.clip(action[2], 0, 1)
-        
+            action = self.decode_model_output(action)
+
         return torch.tensor(action, device=cpu_device, dtype=torch.float32)
         
     def get_stats(self):
@@ -127,6 +145,8 @@ class DDPGManager:
         action_batch = torch.stack(batch.action).to(device)
         reward_batch = torch.cat(batch.reward).to(device)
 
+        action_batch = self.encode_model_output(action_batch)
+
         # Compute Q(s_t, a) using critic network
         state_action_values = self.critic_net(state_batch, action_batch)
 
@@ -153,8 +173,7 @@ class DDPGManager:
         # Compute actor loss
         # Source: https://github.com/lzhan144/Solving-CarRacing-with-DDPG/blob/master/DDPG.py
         # The actor is trained to maximize the expected return of the critic  
-        actions_from_net = self.actor_net(state_batch)
-        actor_loss = -self.critic_net(state_batch, actions_from_net).mean()
+        actor_loss = -(self.critic_net(state_batch, self.actor_net(state_batch)).mean())
         self.actor_loss.append(actor_loss)
 
         self.actor_optimizer.zero_grad()

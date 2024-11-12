@@ -17,6 +17,7 @@ class NoiseGenerator:
         self.x_shape = mean.shape
         self.x = None
 
+        self.decay_rate = 1e-10
         self.reset()
 
     def reset(self):
@@ -32,5 +33,5 @@ class NoiseGenerator:
                   + self.std_dev * np.sqrt(self.dt) * np.random.normal(size=self.x_shape))
         
         # TODO: check if decaying noise helps
-        self.std_dev = self.std_dev * 0.9999
+        self.std_dev = self.std_dev * (1 - self.decay_rate)
         return self.x
