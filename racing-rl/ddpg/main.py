@@ -41,8 +41,6 @@ class DDPGManager:
         self.env = env
         # Get number of actions from gym action space
         self.n_actions = env.action_space.shape[0]
-        if env_type == EnvMode.RACING:
-            self.n_actions -= 1
 
         # Get the number of state observations
         state, info = env.reset()
@@ -98,8 +96,6 @@ class DDPGManager:
             action = self.actor_net(state).cpu()
         
         action = action.squeeze().numpy()
-        if self.env_type == EnvMode.RACING:
-            action = self.decode_model_output(action)
         
         return torch.tensor(action, device=cpu_device, dtype=torch.float32)
 
@@ -120,11 +116,10 @@ class DDPGManager:
         if self.env_type == EnvMode.RACING:
             eps_threshold = EPS_END + (EPS_START - EPS_END) * \
             math.exp(-1. * self.steps_done / EPS_DECAY)
-            if random.random() < eps_threshold:
-                # more aggressive clip for racing
-                action = np.clip(action, -0.5, 0.5)
-
-            action = self.decode_model_output(action)
+            
+            action[0] = action[0].clip(-1, 1)
+            action[1] = action[1].clip(0, 1)
+            action[2] = action[2].clip(0, 1)
 
         return torch.tensor(action, device=cpu_device, dtype=torch.float32)
         
@@ -155,8 +150,6 @@ class DDPGManager:
         action_batch = torch.stack(batch.action).to(device)
         reward_batch = torch.cat(batch.reward).to(device)
 
-        if self.env_type == EnvMode.RACING:
-            action_batch = self.encode_model_output(action_batch)
 
         # Compute Q(s_t, a) using critic network
         state_action_values = self.critic_net(state_batch, action_batch)

@@ -30,7 +30,7 @@ class Policy(Enum):
 current_mode = MODE.TRAIN
 current_policy = Policy.DDPG
 current_env = EnvMode.RACING
-wandb_use = True
+wandb_use = False
 
 continous = False
 if(current_policy == Policy.DDPG):
@@ -57,10 +57,10 @@ elif current_mode == MODE.TEST:
 
 
 if current_env == EnvMode.RACING:
-    # env = SkipFrame(env, skip=1)
+    env = SkipFrame(env, skip=4)
     env = gym_wrap.GrayscaleObservation(env)
     env = gym_wrap.ResizeObservation(env, (84, 84))
-    env = gym_wrap.FrameStackObservation(env, stack_size=1)
+    env = gym_wrap.FrameStackObservation(env, stack_size=4)
 
 device = torch.device(
     "cuda" if torch.cuda.is_available() else
@@ -147,9 +147,9 @@ if current_mode == MODE.TRAIN:
                 if done:
                     manager.episode_durations.append(t + 1)
                     manager.rewards.append(cumulated_reward)
+                    stats = manager.get_stats()
                     if(i_episode % 10 == 0):
                         print(f"Episode {i_episode} lasted {t + 1} steps")
-                        stats = manager.get_stats()
                         print(f"Mean duration: {stats[0]}, Mean reward: {stats[1]}")
 
                     if wandb_use:
