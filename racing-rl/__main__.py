@@ -27,9 +27,9 @@ class Policy(Enum):
     DQN = 0
     DDPG = 1
 
-current_mode = MODE.TEST
+current_mode = MODE.TRAIN
 current_policy = Policy.DDPG
-current_env = EnvMode.PENDULUM
+current_env = EnvMode.RACING
 wandb_use = True
 
 continous = False
@@ -45,7 +45,7 @@ if current_mode == MODE.TRAIN:
             env = gym.make("Pendulum-v1", g=9.81)
     else:
         if current_env == EnvMode.RACING:
-            env = gym.make("CarRacing-v3", continuous=continous)
+            env = gym.make("CarRacing-v3", continuous=continous, render_mode="human")
         elif current_env == EnvMode.PENDULUM:
             env = gym.make("Pendulum-v1", render_mode="human", g=9.81)
 
@@ -67,7 +67,6 @@ device = torch.device(
     "mps" if torch.backends.mps.is_available() else
     "cpu"
 )
-
 cpu_device = torch.device("cpu")
 
 obs, _ = env.reset()
@@ -84,7 +83,7 @@ if current_mode == MODE.TRAIN:
         wandb.init(
             # set the wandb project where this run will be logged
             project="adaptive-rl",
-            name="DDPG-Test-Pendulum",
+            name="DDPG-Test-Racing",
             
             # track hyperparameters and run metadata
             config={
@@ -154,10 +153,12 @@ if current_mode == MODE.TRAIN:
                         print(f"Mean duration: {stats[0]}, Mean reward: {stats[1]}")
 
                     if wandb_use:
-                        wandb.log({"episode_num": i_episode, "total_reward": cumulated_reward, "episode_duration": t+1})
+                        results_dict = {"episode_num": i_episode, "total_reward": cumulated_reward, "episode_duration": t+1,}
 
                         if(current_policy == Policy.DDPG):
-                            wandb.log({"mean_critic_loss": stats[2], "mean_actor_loss": stats[3]})
+                            results_dict.update({"mean_critic_loss": stats[2], "mean_actor_loss": stats[3]})
+                        
+                        wandb.log(results_dict)
                     
                     break
     except KeyboardInterrupt:

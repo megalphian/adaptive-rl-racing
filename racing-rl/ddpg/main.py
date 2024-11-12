@@ -45,7 +45,7 @@ class DDPGManager:
         state, info = env.reset()
         n_observations = state.shape
 
-        self.memory = ReplayMemory(50000)
+        self.memory = ReplayMemory(100000)
         self.env_type = env_type
 
         if env_type == EnvMode.RACING:
@@ -165,11 +165,6 @@ class DDPGManager:
     def soft_update(self):
         # Soft update of the target network's weights
         # θ′ ← τ θ + (1 −τ )θ′
-        # for target_param, param in zip(self.actor_target.parameters(), self.actor_net.parameters()):
-        #     target_param.data.copy_(TAU * param.data + (1 - TAU) * target_param.data)
-        
-        # for target_param, param in zip(self.critic_target.parameters(), self.critic_net.parameters()):
-        #     target_param.data.copy_(TAU * param.data + (1 - TAU) * target_param.data)
 
         for target_param, param in zip(self.actor_target.parameters(), self.actor_net.parameters()):
             target_param.data = TAU * param.data + (1 - TAU) * target_param.data
