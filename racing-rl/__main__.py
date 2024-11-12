@@ -27,7 +27,7 @@ class Policy(Enum):
     DQN = 0
     DDPG = 1
 
-current_mode = MODE.TRAIN
+current_mode = MODE.TEST
 current_policy = Policy.DDPG
 current_env = EnvMode.PENDULUM
 wandb_use = True
@@ -179,20 +179,22 @@ elif current_mode == MODE.TEST:
         manager.policy_net.load_state_dict(torch.load("Models/Racing/model.pth", weights_only=True))
         manager.policy_net.eval()
     elif current_policy == Policy.DDPG:
-        manager = DDPGManager(env)
+        manager = DDPGManager(env, current_env)
         # manager.actor_net.load_state_dict(torch.load("Models/Cartpole/model.pth", weights_only=True))
         manager.actor_net.load_state_dict(torch.load("actor.pth", weights_only=True))
         manager.actor_net.eval()
 
     state, info = env.reset()
-    state = torch.tensor(state, dtype=torch.float32, device=device)
+    state = torch.tensor(state, dtype=torch.float32, device=cpu_device)
     cumulated_reward = 0
     for t in count():
         # env.render()
-        action = manager.select_greedy_action(state)
+        
         if(current_policy == Policy.DDPG):
-            observation, reward, terminated, truncated, _ = env.step(action.cpu().numpy())
+            action = manager.select_greedy_action(state)
+            observation, reward, terminated, truncated, _ = env.step(action.numpy())
         else:
+            action = manager.select_greedy_action(state)
             observation, reward, terminated, truncated, _ = env.step(np.int64(action.item()))
         done = terminated or truncated
         cumulated_reward += reward
@@ -200,7 +202,7 @@ elif current_mode == MODE.TEST:
         if done:
             break
         else:
-            next_state = torch.tensor(observation, dtype=torch.float32, device=device)
+            next_state = torch.tensor(observation, dtype=torch.float32, device=cpu_device)
             # Move to the next state
             state = next_state
 

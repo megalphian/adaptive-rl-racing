@@ -80,8 +80,9 @@ class DDPGManager:
         self.noise_generator = NoiseGenerator(noise_mean, noise_std)
 
     def select_greedy_action(self, state):
+        state = state.to(device)
         with torch.no_grad():
-            return self.actor_net(state)[0]
+            return self.actor_net(state).cpu()
 
     def select_action(self, state):
         self.steps_done += 1
