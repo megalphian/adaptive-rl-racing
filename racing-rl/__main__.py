@@ -57,10 +57,10 @@ elif current_mode == MODE.TEST:
 
 
 if current_env == EnvMode.RACING:
-    env = SkipFrame(env, skip=4)
+    # env = SkipFrame(env, skip=1)
     env = gym_wrap.GrayscaleObservation(env)
     env = gym_wrap.ResizeObservation(env, (84, 84))
-    env = gym_wrap.FrameStackObservation(env, stack_size=4)
+    env = gym_wrap.FrameStackObservation(env, stack_size=1)
 
 device = torch.device(
     "cuda" if torch.cuda.is_available() else
@@ -153,7 +153,7 @@ if current_mode == MODE.TRAIN:
                         print(f"Mean duration: {stats[0]}, Mean reward: {stats[1]}")
 
                     if wandb_use:
-                        results_dict = {"episode_num": i_episode, "total_reward": cumulated_reward, "episode_duration": t+1,}
+                        results_dict = {"episode_num": i_episode, "total_reward": cumulated_reward, "episode_duration": t+1, 'mean_reward': stats[1]}
 
                         if(current_policy == Policy.DDPG):
                             results_dict.update({"mean_critic_loss": stats[2], "mean_actor_loss": stats[3]})
