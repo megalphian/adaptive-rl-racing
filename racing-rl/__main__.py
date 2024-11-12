@@ -13,6 +13,7 @@ from dqn.main import DQNManager
 from ddpg.main import DDPGManager
 
 from core.skip_frame import SkipFrame
+from core.envs import EnvMode
 
 from enum import Enum
 
@@ -28,6 +29,7 @@ class Policy(Enum):
 
 current_mode = MODE.TRAIN
 current_policy = Policy.DDPG
+current_env = EnvMode.PENDULUM
 wandb_use = True
 
 continous = False
@@ -36,22 +38,29 @@ if(current_policy == Policy.DDPG):
 
 # Initialise the environment
 if current_mode == MODE.TRAIN:
-    # env = gym.make("CartPole-v1")
     if wandb_use:
-        env = gym.make("CarRacing-v3", continuous=continous)
+        if current_env == EnvMode.RACING:
+            env = gym.make("CarRacing-v3", continuous=continous)
+        elif current_env == EnvMode.PENDULUM:
+            env = gym.make("Pendulum-v1", g=9.81)
     else:
-        env = gym.make("CarRacing-v3", continuous=continous, render_mode="human")
+        if current_env == EnvMode.RACING:
+            env = gym.make("CarRacing-v3", continuous=continous)
+        elif current_env == EnvMode.PENDULUM:
+            env = gym.make("Pendulum-v1", render_mode="human", g=9.81)
+
 elif current_mode == MODE.TEST:
-    # env = gym.make("CartPole-v1", render_mode="human")
-    env = gym.make("CarRacing-v3", render_mode="human", continuous=continous)
+    if current_env == EnvMode.RACING:
+        env = gym.make("CarRacing-v3", render_mode="human", continuous=continous)
+    elif current_env == EnvMode.PENDULUM:
+        env = gym.make("Pendulum-v1", render_mode="human", g=9.81)
 
 
-env = SkipFrame(env, skip=4)
-
-env = gym_wrap.GrayscaleObservation(env)
-env = gym_wrap.ResizeObservation(env, (84, 84))
-
-env = gym_wrap.FrameStackObservation(env, stack_size=4)
+if current_env == EnvMode.RACING:
+    env = SkipFrame(env, skip=4)
+    env = gym_wrap.GrayscaleObservation(env)
+    env = gym_wrap.ResizeObservation(env, (84, 84))
+    env = gym_wrap.FrameStackObservation(env, stack_size=4)
 
 device = torch.device(
     "cuda" if torch.cuda.is_available() else
@@ -75,7 +84,7 @@ if current_mode == MODE.TRAIN:
         wandb.init(
             # set the wandb project where this run will be logged
             project="adaptive-rl",
-            name="DDPG-Test-2",
+            name="DDPG-Test-Pendulum",
             
             # track hyperparameters and run metadata
             config={
@@ -87,14 +96,14 @@ if current_mode == MODE.TRAIN:
         )
 
     if torch.cuda.is_available() or torch.backends.mps.is_available():
-        num_episodes = 3000
+        num_episodes = 2000
     else:
         num_episodes = 50
 
     if current_policy == Policy.DQN:
         manager = DQNManager(env)
     elif current_policy == Policy.DDPG:
-        manager = DDPGManager(env)
+        manager = DDPGManager(env, current_env)
     else:
         raise ValueError("Policy not supported")
     

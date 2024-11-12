@@ -8,6 +8,36 @@ device = torch.device(
     "mps" if torch.backends.mps.is_available() else
     "cpu"
 )
+
+class Actor(nn.Module):
+    def __init__(self, n_observations, n_actions):
+        super(Actor, self).__init__()
+        self.fc1 = nn.Linear(n_observations, 512)
+        self.fc2 = nn.Linear(512, 256)
+        self.fc3 = nn.Linear(256, n_actions)
+        
+    # Called with either one element to determine next action, or a batch
+    # during optimization. Returns tensor([[left0exp,right0exp]...]).
+    def forward(self, x):
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = torch.tanh(self.fc3(x))
+        return x
+        
+class Critic(nn.Module):
+    def __init__(self, n_observations, n_actions):
+        super(Critic, self).__init__()
+        self.fc1 = nn.Linear(n_observations, 512)
+        self.fc2 = nn.Linear(512 + n_actions, 256)
+        self.fc3 = nn.Linear(256, 1)
+        
+    def forward(self, x, u):
+        x = F.relu(self.fc1(x))
+        x = torch.cat([x, u], 1)
+        x = F.relu(self.fc2(x))
+        x = self.fc3(x)
+        return x
+
 class Actor_CNN(nn.Module):
 
     def __init__(self, n_observations, n_actions):

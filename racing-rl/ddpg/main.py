@@ -1,6 +1,7 @@
-from ddpg.ddpg import Actor_CNN, Critic_CNN
+from ddpg.ddpg import Actor_CNN, Critic_CNN, Actor, Critic
 from core.replay_buffer import ReplayMemory, Transition
 from core.noise_generator import NoiseGenerator
+from core.envs import EnvMode
 
 from collections import deque
 
@@ -36,7 +37,7 @@ cpu_device = torch.device("cpu")
 
 class DDPGManager:
 
-    def __init__(self, env):
+    def __init__(self, env, env_type):
         self.env = env
         # Get number of actions from gym action space
         self.n_actions = env.action_space.shape[0]
@@ -45,15 +46,26 @@ class DDPGManager:
         n_observations = state.shape
 
         self.memory = ReplayMemory(50000)
+        self.env_type = env_type
 
-        self.actor_net = Actor_CNN(n_observations, self.n_actions).to(device)
-        self.actor_target = Actor_CNN(n_observations, self.n_actions).to(device)
+        if env_type == EnvMode.RACING:
+            self.actor_net = Actor_CNN(n_observations, self.n_actions).to(device)
+            self.actor_target = Actor_CNN(n_observations, self.n_actions).to(device)
+            self.critic_net = Critic_CNN(n_observations, self.n_actions).to(device)
+            self.critic_target = Critic_CNN(n_observations, self.n_actions).to(device)
+        elif env_type == EnvMode.PENDULUM:
+            n_observations = n_observations[0]
+            self.actor_net = Actor(n_observations, self.n_actions).to(device)
+            self.actor_target = Actor(n_observations, self.n_actions).to(device)
+            self.critic_net = Critic(n_observations, self.n_actions).to(device)
+            self.critic_target = Critic(n_observations, self.n_actions).to(device)
+        else:
+            raise ValueError("Environment not supported")
+        
         self.actor_target.load_state_dict(self.actor_net.state_dict())
         self.actor_optimizer = optim.AdamW(self.actor_net.parameters(), lr=LR, amsgrad=True)
         self.actor_loss = deque(maxlen=100)
-
-        self.critic_net = Critic_CNN(n_observations, self.n_actions).to(device)
-        self.critic_target = Critic_CNN(n_observations, self.n_actions).to(device)
+        
         self.critic_target.load_state_dict(self.critic_net.state_dict())
         self.critic_optimizer = optim.AdamW(self.critic_net.parameters(), lr=LR, amsgrad=True)
         self.critic_loss = deque(maxlen=100)
@@ -64,7 +76,7 @@ class DDPGManager:
         self.steps_done = 0
 
         noise_mean = np.full(self.n_actions, 0.0, np.float32)
-        noise_std  = np.array([0.5, 0.2, 0.2], np.float32)
+        noise_std  = np.full(self.n_actions, 0.2, np.float32)
         self.noise_generator = NoiseGenerator(noise_mean, noise_std)
 
     def select_greedy_action(self, state):
@@ -80,9 +92,10 @@ class DDPGManager:
         noise = self.noise_generator.generate()
         action = action + noise
 
-        action[0] = np.clip(action[0], -1, 1)
-        action[1] = np.clip(action[1], 0, 1)
-        action[2] = np.clip(action[2], 0, 1)
+        if self.env_type == EnvMode.RACING:
+            action[0] = np.clip(action[0], -1, 1)
+            action[1] = np.clip(action[1], 0, 1)
+            action[2] = np.clip(action[2], 0, 1)
         
         return torch.tensor(action, device=cpu_device, dtype=torch.float32)
         
