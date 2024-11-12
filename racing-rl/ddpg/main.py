@@ -91,32 +91,37 @@ class DDPGManager:
         return torch.stack([actions[:, 0], actions[:, 1] - actions[:, 2]], dim=1)
 
     def select_greedy_action(self, state):
-        state = state.to(device)
+        state = state.to(device).unsqueeze(0)
+
         with torch.no_grad():
             action = self.actor_net(state).cpu()
         
         action = action.squeeze().numpy()
+
+        if self.env_type == EnvMode.RACING:
+            action[0] = action[0].clip(-1, 1)
+            action[1] = action[1].clip(0, 1)
+            action[2] = action[2].clip(0, 1)
         
         return torch.tensor(action, device=cpu_device, dtype=torch.float32)
 
     def select_action(self, state):
         self.steps_done += 1
-        state = state.to(device)
+        state = state.to(device).unsqueeze(0)
         with torch.no_grad():
             action = self.actor_net(state).cpu()
         
         action = action.squeeze().numpy()
+
+        if self.env_type == EnvMode.RACING:
+            action[0] = action[0].clip(-1, 1)
+            action[1] = action[1].clip(0, 1)
+            action[2] = action[2].clip(0, 1)
         
         noise = self.noise_generator.generate()
         action = action + noise
 
-        # Clip the action values to the valid range
-        action = np.clip(action, -1.0, 1.0)
-
         if self.env_type == EnvMode.RACING:
-            eps_threshold = EPS_END + (EPS_START - EPS_END) * \
-            math.exp(-1. * self.steps_done / EPS_DECAY)
-            
             action[0] = action[0].clip(-1, 1)
             action[1] = action[1].clip(0, 1)
             action[2] = action[2].clip(0, 1)
