@@ -1,5 +1,5 @@
 from dqn.dqn import DQN_CNN
-from core.replay_buffer import ReplayMemory, Transition
+from core.memory.replay_buffer import ReplayMemory, Transition
 
 import torch
 import torch.nn as nn

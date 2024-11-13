@@ -2,6 +2,9 @@ from collections import namedtuple, deque
 import random
 
 import matplotlib.pyplot as plt
+import numpy as np
+
+import torch
 
 Transition = namedtuple('Transition',
                         ('state', 'action', 'next_state', 'reward'))

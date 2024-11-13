@@ -112,6 +112,7 @@ if current_mode == MODE.TRAIN:
             state, info = env.reset()
             state = torch.tensor(state, dtype=torch.float32, device=cpu_device)
             cumulated_reward = 0
+            manager.noise_generator.reset()
             for t in count():
                 timestep_n += 1
                 action = manager.select_action(state)

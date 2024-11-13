@@ -18,6 +18,7 @@ class NoiseGenerator:
         self.x = None
 
         self.decay_rate = 1e-5
+        self.decay_rate = 0
         self.reset()
 
     def reset(self):

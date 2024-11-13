@@ -1,5 +1,6 @@
 from ddpg.ddpg import Actor_CNN, Critic_CNN, Actor, Critic
-from core.replay_buffer import ReplayMemory, Transition
+from core.memory.replay_buffer import ReplayMemory, Transition
+from core.memory.priority_replay_buffer import PrioritizedReplayBuffer
 from core.noise_generator import NoiseGenerator
 from core.envs import EnvMode
 
@@ -46,7 +47,8 @@ class DDPGManager:
         state, info = env.reset()
         n_observations = state.shape
 
-        self.memory = ReplayMemory(1000000)
+        # self.memory = ReplayMemory(50000)
+        self.memory = PrioritizedReplayBuffer(50000)
         self.env_type = env_type
 
         if env_type == EnvMode.RACING:
@@ -139,11 +141,12 @@ class DDPGManager:
     def optimize_model(self):
         if len(self.memory) < BATCH_SIZE:
             return
-        transitions = self.memory.sample(BATCH_SIZE)
+        transitions, weights, tree_idxs = self.memory.sample(BATCH_SIZE)
         # Transpose the batch (see https://stackoverflow.com/a/19343/3343043 for
         # detailed explanation). This converts batch-array of Transitions
         # to Transition of batch-arrays.
         batch = Transition(*zip(*transitions))
+        weights = torch.tensor(weights, device=device, dtype=torch.float32).squeeze()
 
         # Compute a mask of non-final states and concatenate the batch elements
         # (a final state would've been the one after which simulation ended)
@@ -154,7 +157,6 @@ class DDPGManager:
         state_batch = torch.stack(batch.state).to(device)
         action_batch = torch.stack(batch.action).to(device)
         reward_batch = torch.cat(batch.reward).to(device)
-
 
         # Compute Q(s_t, a) using critic network
         state_action_values = self.critic_net(state_batch, action_batch)
@@ -169,8 +171,9 @@ class DDPGManager:
 
         # Compute Huber loss
         state_action_values = state_action_values.squeeze()
+        td_errors = (expected_state_action_values - state_action_values).abs()
 
-        critic_loss = (state_action_values - expected_state_action_values).pow(2).mean()
+        critic_loss = ((td_errors ** 2) * weights).mean()
         self.critic_loss.append(critic_loss)
 
         # Optimize the model
@@ -189,6 +192,9 @@ class DDPGManager:
         actor_loss.backward()
         # torch.nn.utils.clip_grad_value_(self.actor_net.parameters(), 100)
         self.actor_optimizer.step()
+
+        # Update the priorities in the replay buffer
+        self.memory.update_priorities(tree_idxs, td_errors)
 
     def soft_update(self):
         # Soft update of the target network's weights
