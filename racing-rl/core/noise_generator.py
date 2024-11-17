@@ -17,7 +17,7 @@ class NoiseGenerator:
         self.x_shape = mean.shape
         self.x = None
 
-        self.decay_rate = 1e-5
+        self.decay_rate = 1/(250 * 2000)
         self.decay_rate = 0
         self.reset()
 

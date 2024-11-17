@@ -14,6 +14,8 @@ import math
 import random
 import numpy as np
 
+import wandb
+
 # BATCH_SIZE is the number of transitions sampled from the replay buffer
 # GAMMA is the discount factor as mentioned in the previous section
 # EPS_START is the starting value of epsilon
@@ -21,7 +23,7 @@ import numpy as np
 # EPS_DECAY controls the rate of exponential decay of epsilon, higher means a slower decay
 # TAU is the update rate of the target network
 # LR is the learning rate of the ``AdamW`` optimizer
-BATCH_SIZE = 64
+BATCH_SIZE = 128
 GAMMA = 0.99
 EPS_START = 0.9
 EPS_END = 0.05
@@ -38,8 +40,9 @@ cpu_device = torch.device("cpu")
 
 class DDPGManager:
 
-    def __init__(self, env, env_type):
+    def __init__(self, env, env_type, wandb_use):
         self.env = env
+        self.wandb_use = wandb_use
         # Get number of actions from gym action space
         self.n_actions = env.action_space.shape[0]
 
@@ -47,8 +50,8 @@ class DDPGManager:
         state, info = env.reset()
         n_observations = state.shape
 
-        # self.memory = ReplayMemory(50000)
-        self.memory = PrioritizedReplayBuffer(50000)
+        self.memory = ReplayMemory(50000)
+        # self.memory = PrioritizedReplayBuffer(50000)
         self.env_type = env_type
 
         if env_type == EnvMode.RACING:
@@ -79,7 +82,7 @@ class DDPGManager:
         self.steps_done = 0
 
         noise_mean = np.full(self.n_actions, 0.0, np.float32)
-        noise_std  = np.full(self.n_actions, 0.2, np.float32)
+        noise_std  = np.full(self.n_actions, 0.4, np.float32)
         self.noise_generator = NoiseGenerator(noise_mean, noise_std)
 
     def decode_model_output(self, model_out):
@@ -111,6 +114,7 @@ class DDPGManager:
         self.steps_done += 1
         state = state.to(device).unsqueeze(0)
         with torch.no_grad():
+            self.actor_net.eval()
             action = self.actor_net(state).cpu()
         
         action = action.squeeze().numpy()
@@ -141,6 +145,8 @@ class DDPGManager:
     def optimize_model(self):
         if len(self.memory) < BATCH_SIZE:
             return
+        self.actor_net.train()
+
         transitions, weights, tree_idxs = self.memory.sample(BATCH_SIZE)
         # Transpose the batch (see https://stackoverflow.com/a/19343/3343043 for
         # detailed explanation). This converts batch-array of Transitions
@@ -168,9 +174,9 @@ class DDPGManager:
             next_state_values[non_final_mask] = target_val.squeeze()
         # Compute the expected Q values
         expected_state_action_values = (next_state_values * GAMMA) + reward_batch
+        state_action_values = state_action_values.squeeze()
 
         # Compute Huber loss
-        state_action_values = state_action_values.squeeze()
         td_errors = (expected_state_action_values - state_action_values).abs()
 
         critic_loss = ((td_errors ** 2) * weights).mean()
@@ -193,8 +199,11 @@ class DDPGManager:
         # torch.nn.utils.clip_grad_value_(self.actor_net.parameters(), 100)
         self.actor_optimizer.step()
 
-        # Update the priorities in the replay buffer
-        self.memory.update_priorities(tree_idxs, td_errors)
+        if self.wandb_use:
+            wandb.log({"actor_loss": actor_loss.item(), "critic_loss": critic_loss.item()})
+
+        ## Update the priorities in the replay buffer
+        # self.memory.update_priorities(tree_idxs, td_errors)
 
     def soft_update(self):
         # Soft update of the target network's weights

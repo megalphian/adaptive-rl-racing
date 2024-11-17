@@ -30,7 +30,7 @@ class Policy(Enum):
 current_mode = MODE.TRAIN
 current_policy = Policy.DDPG
 current_env = EnvMode.RACING
-wandb_use = False
+wandb_use = True
 
 continous = False
 if(current_policy == Policy.DDPG):
@@ -102,7 +102,7 @@ if current_mode == MODE.TRAIN:
     if current_policy == Policy.DQN:
         manager = DQNManager(env)
     elif current_policy == Policy.DDPG:
-        manager = DDPGManager(env, current_env)
+        manager = DDPGManager(env, current_env, wandb_use)
     else:
         raise ValueError("Policy not supported")
     
@@ -155,9 +155,6 @@ if current_mode == MODE.TRAIN:
 
                     if wandb_use:
                         results_dict = {"episode_num": i_episode, "total_reward": cumulated_reward, "episode_duration": t+1, 'mean_reward': stats[1]}
-
-                        if(current_policy == Policy.DDPG):
-                            results_dict.update({"mean_critic_loss": stats[2], "mean_actor_loss": stats[3]})
                         
                         wandb.log(results_dict)
                     
