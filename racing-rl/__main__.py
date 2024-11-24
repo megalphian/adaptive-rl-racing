@@ -32,6 +32,8 @@ current_policy = Policy.DDPG
 current_env = EnvMode.RACING
 wandb_use = True
 
+preload_model = True
+
 continous = False
 if(current_policy == Policy.DDPG):
     continous = True
@@ -103,6 +105,9 @@ if current_mode == MODE.TRAIN:
         manager = DQNManager(env)
     elif current_policy == Policy.DDPG:
         manager = DDPGManager(env, current_env, wandb_use)
+        if preload_model:
+            manager.actor_net.load_state_dict(torch.load("Models/Racing/DDPG-v2/actor.pth", weights_only=True))
+            manager.critic_net.load_state_dict(torch.load("Models/Racing/DDPG-v2/critic.pth", weights_only=True))
     else:
         raise ValueError("Policy not supported")
     
@@ -178,9 +183,10 @@ elif current_mode == MODE.TEST:
         manager.policy_net.load_state_dict(torch.load("Models/Racing/model.pth", weights_only=True))
         manager.policy_net.eval()
     elif current_policy == Policy.DDPG:
-        manager = DDPGManager(env, current_env)
+        manager = DDPGManager(env, current_env, False)
         # manager.actor_net.load_state_dict(torch.load("Models/Cartpole/model.pth", weights_only=True))
-        manager.actor_net.load_state_dict(torch.load("actor.pth", weights_only=True))
+        manager.actor_net.load_state_dict(torch.load("Models/Racing/DDPG-v2/actor.pth", weights_only=True))
+        # manager.actor_net.load_state_dict(torch.load("actor.pth", weights_only=True))
         manager.actor_net.eval()
 
     state, info = env.reset()
